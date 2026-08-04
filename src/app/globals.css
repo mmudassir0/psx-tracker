@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/**
+ * Chart tokens. Charts are written against these roles, never raw hex, so the
+ * light/dark values swap in one place. Values come from the validated
+ * reference palette and were re-run against this app's own surfaces.
+ */
+:root {
+  --chart-surface: #f8fafc;
+  --chart-text-primary: #0b0b0b;
+  --chart-text-secondary: #52514e;
+  --chart-muted: #898781;
+  --chart-grid: #e1e0d9;
+  --chart-baseline: #c3c2b7;
+
+  /* Categorical slots — fixed order, assigned by entity, never cycled. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+
+  /* Diverging pair for day change: cool = up, warm = down, gray midpoint.
+     Deliberately not green/red — that pair is the classic red-green CVD trap. */
+  --diverge-pos-strong: #184f95;
+  --diverge-pos-mid: #2a78d6;
+  --diverge-pos-weak: #9ec5f4;
+  --diverge-neutral: #f0efec;
+  --diverge-neg-weak: #f4b8b8;
+  --diverge-neg-mid: #d03b3b;
+  --diverge-neg-strong: #8f2020;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    --chart-surface: #020617;
+    --chart-text-primary: #ffffff;
+    --chart-text-secondary: #c3c2b7;
+    --chart-muted: #898781;
+    --chart-grid: #2c2c2a;
+    --chart-baseline: #383835;
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+
+    --diverge-pos-strong: #86b6ef;
+    --diverge-pos-mid: #3987e5;
+    --diverge-pos-weak: #1c5cab;
+    --diverge-neutral: #383835;
+    --diverge-neg-weak: #7a2626;
+    --diverge-neg-mid: #d03b3b;
+    --diverge-neg-strong: #ef8f8f;
+  }
+}
+
+body {
+  font-family: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+}
+
+/* Columns of figures must align; standalone display numbers must not. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
