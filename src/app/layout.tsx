@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
 import { NavLinks } from "@/components/NavLinks";
+import { countUnacknowledgedEvents } from "@/lib/alerts";
+import { isDatabaseEmpty } from "@/lib/market";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -21,6 +23,9 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
+  // Guarded: the layout renders before the first ingest, when no tables exist.
+  const unreadAlerts = isDatabaseEmpty() ? 0 : countUnacknowledgedEvents();
+
   return (
     <html
       lang="en"
@@ -37,7 +42,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                 Pakistan Stock Exchange
               </span>
             </Link>
-            <NavLinks />
+            <NavLinks unreadAlerts={unreadAlerts} />
           </header>
 
           <main className="flex-1 py-6">{children}</main>

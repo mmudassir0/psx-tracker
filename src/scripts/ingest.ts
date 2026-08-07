@@ -8,6 +8,8 @@
  */
 import { runIngest, detectRecomposition } from "@/lib/psx/ingest";
 import { evaluateAlerts } from "@/lib/alerts";
+import { notifyAlerts, notifyIngestComplete } from "@/lib/notify";
+import { recordScreenHits } from "@/lib/screens";
 import { indexLabel, sortIndexCodes } from "@/lib/psx/indices";
 
 function flagValue(name: string): string | null {
@@ -91,7 +93,16 @@ async function main() {
       console.log(`  dropped: ${recomp.dropped.join(", ")}`);
   }
 
+  // Snapshot screen matches so tomorrow can diff against today.
+  const screenHitCount = recordScreenHits();
+  if (screenHitCount > 0) console.log(`\nscreen matches recorded: ${screenHitCount}`);
+
   const fired = evaluateAlerts();
+  notifyAlerts(fired);
+  notifyIngestComplete(
+    `${result.constituentCount} constituents, ${result.quotesWritten} quotes`,
+    result.errors.length > 0,
+  );
   if (fired.length) {
     console.log(`\n${fired.length} alert(s) fired:`);
     for (const f of fired) console.log(`  - ${f.message}`);

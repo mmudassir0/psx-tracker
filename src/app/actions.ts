@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import {
   addTransaction,
@@ -18,8 +19,16 @@ import {
 import { runIngest } from "@/lib/psx/ingest";
 import { desc } from "drizzle-orm";
 import { db } from "@/db";
-import { ingestRuns } from "@/db/schema";
+import { ingestRuns, watchlist } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { setSetting } from "@/lib/settings";
+import { notifyAlerts } from "@/lib/notify";
+import {
+  recordScreenHits,
+  createCustomScreen,
+  updateCustomScreen,
+  deleteCustomScreen,
+} from "@/lib/screens";
 import { getZakatSettings, ZAKAT_SETTINGS_KEY } from "@/lib/zakat";
 
 export interface ActionState {
@@ -334,7 +343,8 @@ export async function startIngestAction(
   void runIngest({ ...options, trigger: "ui" })
     .then(() => {
       try {
-        evaluateAlerts();
+        recordScreenHits();
+        notifyAlerts(evaluateAlerts());
       } catch {
         // Alert evaluation failing must not mark the ingest itself failed.
       }
@@ -349,4 +359,121 @@ export async function startIngestAction(
 /** Refresh the cached pages once a run finishes. */
 export async function revalidateAllAction() {
   revalidatePath("/", "layout");
+}
+
+// ---------------------------------------------------------------------------
+// Watchlist
+// ---------------------------------------------------------------------------
+
+export async function addToWatchlistAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const symbol = String(formData.get("symbol") ?? "").trim().toUpperCase();
+  const note = String(formData.get("note") ?? "").trim() || null;
+  if (!symbol) return { ok: false, message: "Symbol is required" };
+
+  const { getConstituent } = await import("@/lib/market");
+  const view = getConstituent(symbol, "ALLSHR");
+  if (!view) {
+    return { ok: false, message: `${symbol} is not a symbol PSX lists` };
+  }
+
+  db.insert(watchlist)
+    .values({
+      symbol,
+      note,
+      // Snapshot the price so drift since adding is measurable later.
+      addedPrice: view.close ?? null,
+      addedAt: new Date(),
+    })
+    .onConflictDoUpdate({ target: watchlist.symbol, set: { note } })
+    .run();
+
+  revalidatePath("/watchlist");
+  return { ok: true, message: `${symbol} added` };
+}
+
+export async function removeFromWatchlistAction(formData: FormData) {
+  const symbol = String(formData.get("symbol") ?? "");
+  if (symbol) db.delete(watchlist).where(eq(watchlist.symbol, symbol)).run();
+  revalidatePath("/watchlist");
+}
+
+// ---------------------------------------------------------------------------
+// Custom screens
+// ---------------------------------------------------------------------------
+
+const screenRuleSchema = z.object({
+  metric: z.enum([
+    "dividendYieldPct",
+    "peTtm",
+    "epsGrowthPct",
+    "revenueGrowthPct",
+    "netMarginPct",
+    "ytdChangePct",
+    "year1ChangePct",
+    "drawdownFrom52wPct",
+    "changePct",
+    "marketCap",
+    "tradedValue",
+  ]),
+  op: z.enum(["gte", "lte", "gt", "lt"]),
+  value: z.number().finite(),
+});
+
+const screenSchema = z.object({
+  name: z.string().trim().min(1, "Give the screen a name").max(60),
+  description: z.string().trim().max(200).optional(),
+  universe: z.enum(["all", "shariah"]),
+  rules: z.array(screenRuleSchema).min(1, "Add at least one rule").max(8),
+});
+
+/** Rules arrive as a JSON string from the builder. */
+function parseScreenForm(formData: FormData) {
+  let rules: unknown = [];
+  try {
+    rules = JSON.parse(String(formData.get("rules") ?? "[]"));
+  } catch {
+    rules = [];
+  }
+
+  return screenSchema.safeParse({
+    name: formData.get("name"),
+    description: formData.get("description") || undefined,
+    universe: formData.get("universe"),
+    rules,
+  });
+}
+
+export async function saveScreenAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = parseScreenForm(formData);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "Invalid screen",
+    };
+  }
+
+  const existingId = String(formData.get("id") ?? "").trim();
+  if (existingId) {
+    updateCustomScreen(existingId, parsed.data);
+    revalidatePath("/screens");
+    revalidatePath(`/screens/${existingId}`);
+    return { ok: true, message: "Screen updated" };
+  }
+
+  const id = createCustomScreen(parsed.data);
+  revalidatePath("/screens");
+  redirect(`/screens/${id}`);
+}
+
+export async function deleteScreenAction(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  if (id) deleteCustomScreen(id);
+  revalidatePath("/screens");
+  redirect("/screens");
 }

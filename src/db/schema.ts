@@ -264,6 +264,46 @@ export const financials = sqliteTable(
   ],
 );
 
+/**
+ * Daily record of which symbols matched which screen.
+ *
+ * Stored rather than recomputed so "what newly triggered today" is a diff of
+ * consecutive dates — the same approach the recomposition tracker uses.
+ */
+export const screenHits = sqliteTable(
+  "screen_hits",
+  {
+    screenId: text("screen_id").notNull(),
+    date: text("date").notNull(),
+    symbol: text("symbol").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.screenId, t.date, t.symbol] }),
+    index("screen_hits_screen_date_idx").on(t.screenId, t.date),
+  ],
+);
+
+/** User-defined screens. Built-in ones live in code, not here. */
+export const customScreens = sqliteTable("custom_screens", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  /** JSON-encoded ScreenRule[]. */
+  rules: text("rules").notNull(),
+  /** "all" | "shariah" | an index code. */
+  universe: text("universe").notNull().default("all"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+/** Symbols being followed without owning them — no effect on the ledger. */
+export const watchlist = sqliteTable("watchlist", {
+  symbol: text("symbol").primaryKey(),
+  note: text("note"),
+  /** Price at the moment it was added, so drift since is measurable. */
+  addedPrice: real("added_price"),
+  addedAt: integer("added_at", { mode: "timestamp" }).notNull(),
+});
+
 /** Small key/value store for user preferences (zakat inputs, and similar). */
 export const appSettings = sqliteTable("app_settings", {
   key: text("key").primaryKey(),

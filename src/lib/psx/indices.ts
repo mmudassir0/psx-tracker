@@ -81,6 +81,9 @@ export const PREFERRED_ORDER = [
 
 export const DEFAULT_INDEX = "KMI30";
 
+/** Indices that are Shariah-screened by construction. */
+export const SHARIAH_INDEX_CODES = ["KMI30", "KMIALLSHR"];
+
 export function getIndexMeta(code: string): IndexMeta {
   const entry = CATALOGUE[code];
   return {

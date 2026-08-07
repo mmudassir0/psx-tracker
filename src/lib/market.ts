@@ -13,9 +13,11 @@ import { startOfYear } from "@/lib/dates";
 import { getTrailingDividendMap } from "@/lib/dividends";
 import {
   getLatestMetricMap,
+  getRevenueGrowthMap,
   METRIC_EPS_GROWTH,
   METRIC_NET_MARGIN,
 } from "@/lib/financials";
+import { SHARIAH_INDEX_CODES } from "@/lib/psx/indices";
 
 export interface ConstituentView {
   symbol: string;
@@ -51,6 +53,10 @@ export interface ConstituentView {
   epsGrowthPct: number | null;
   /** Latest reported net profit margin, percent. */
   netMarginPct: number | null;
+  /** Revenue growth between the two most recent fiscal years, percent. */
+  revenueGrowthPct: number | null;
+  /** Member of a Shariah-screened index. Derived from membership, not asserted. */
+  shariah: boolean;
 }
 
 /** Most recent date for which we have any quote data. */
@@ -92,9 +98,10 @@ interface ViewMaps {
   dividends?: Map<string, number>;
   epsGrowth?: Map<string, number>;
   netMargin?: Map<string, number>;
+  revenueGrowth?: Map<string, number>;
 }
 
-function buildView(
+export function buildView(
   symbol: string,
   quoteDate: string | null,
   maps: ViewMaps = {},
@@ -144,6 +151,12 @@ function buildView(
   const netMargin =
     (maps.netMargin ?? getLatestMetricMap(METRIC_NET_MARGIN)).get(symbol) ??
     null;
+  const revenueGrowth =
+    (maps.revenueGrowth ?? getRevenueGrowthMap()).get(symbol) ?? null;
+
+  // Shariah status is derived from index membership, never asserted.
+  const memberOf = (meta?.indexes ?? "").split(",").map((x) => x.trim());
+  const shariah = memberOf.some((code) => SHARIAH_INDEX_CODES.includes(code));
 
   return {
     symbol,
@@ -173,6 +186,8 @@ function buildView(
       dps != null && close != null && close > 0 ? (dps / close) * 100 : null,
     epsGrowthPct: epsGrowth,
     netMarginPct: netMargin,
+    revenueGrowthPct: revenueGrowth,
+    shariah,
   };
 }
 
@@ -210,6 +225,7 @@ export function getConstituents(
     dividends: getTrailingDividendMap(),
     epsGrowth: getLatestMetricMap(METRIC_EPS_GROWTH, members),
     netMargin: getLatestMetricMap(METRIC_NET_MARGIN, members),
+    revenueGrowth: getRevenueGrowthMap(members),
   };
   const rows = members.map((symbol) => buildView(symbol, quoteDate, maps));
 
@@ -416,4 +432,111 @@ export function isDatabaseEmpty(): boolean {
     .from(symbols)
     .get();
   return (row?.count ?? 0) === 0;
+}
+
+/**
+ * Every symbol we hold a quote for, as a full view.
+ *
+ * The index pages only ever look at constituents, but the database carries
+ * the whole market (~490 names). Screens, movers and breadth all need that
+ * wider universe, so the maps are built once and shared rather than being
+ * rebuilt per symbol — the difference is roughly 500 queries versus 4.
+ */
+export function getAllSymbolViews(): ConstituentView[] {
+  const quoteDate = latestQuoteDate();
+  if (!quoteDate) return [];
+
+  const universe = db
+    .selectDistinct({ symbol: quotesDaily.symbol })
+    .from(quotesDaily)
+    .where(eq(quotesDaily.date, quoteDate))
+    .all()
+    .map((r) => r.symbol);
+
+  if (universe.length === 0) return [];
+
+  const maps: ViewMaps = {
+    dividends: getTrailingDividendMap(),
+    epsGrowth: getLatestMetricMap(METRIC_EPS_GROWTH, universe),
+    netMargin: getLatestMetricMap(METRIC_NET_MARGIN, universe),
+    revenueGrowth: getRevenueGrowthMap(universe),
+  };
+
+  return universe.map((symbol) => buildView(symbol, quoteDate, maps));
+}
+
+export interface MarketBreadth {
+  advancing: number;
+  declining: number;
+  unchanged: number;
+  total: number;
+  /** Advancing as a share of names that actually moved, 0-100. */
+  advanceRatioPct: number | null;
+  /** Names that closed at a 10% circuit limit, either way. */
+  limitUp: number;
+  limitDown: number;
+  date: string | null;
+}
+
+/** Market-wide breadth — a better read on the day than 30 constituents. */
+export function getMarketBreadth(
+  rows: ConstituentView[] = getAllSymbolViews(),
+): MarketBreadth {
+  const moved = rows.filter((r) => r.changePct != null);
+  const advancing = moved.filter((r) => (r.changePct ?? 0) > 0).length;
+  const declining = moved.filter((r) => (r.changePct ?? 0) < 0).length;
+  const unchanged = moved.length - advancing - declining;
+
+  // PSX applies a 10% daily circuit breaker; a small tolerance absorbs rounding.
+  const limitUp = moved.filter((r) => (r.changePct ?? 0) >= 9.95).length;
+  const limitDown = moved.filter((r) => (r.changePct ?? 0) <= -9.95).length;
+
+  const directional = advancing + declining;
+
+  return {
+    advancing,
+    declining,
+    unchanged,
+    total: moved.length,
+    advanceRatioPct: directional > 0 ? (advancing / directional) * 100 : null,
+    limitUp,
+    limitDown,
+    date: latestQuoteDate(),
+  };
+}
+
+export interface Movers {
+  gainers: ConstituentView[];
+  losers: ConstituentView[];
+  mostActive: ConstituentView[];
+}
+
+/**
+ * Gainers, losers and most active by traded value.
+ *
+ * Ranking "most active" by traded value rather than share count matters:
+ * volume alone puts every sub-PKR-10 penny stock at the top.
+ */
+export function getMovers(
+  rows: ConstituentView[] = getAllSymbolViews(),
+  limit = 15,
+): Movers {
+  const withChange = rows.filter((r) => r.changePct != null);
+
+  const byValue = rows
+    .filter((r) => r.volume != null && r.close != null)
+    .map((r) => ({ row: r, value: (r.volume ?? 0) * (r.close ?? 0) }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, limit)
+    .map((x) => x.row);
+
+  return {
+    gainers: [...withChange]
+      .sort((a, b) => (b.changePct ?? 0) - (a.changePct ?? 0))
+      .slice(0, limit),
+    losers: [...withChange]
+      .sort((a, b) => (a.changePct ?? 0) - (b.changePct ?? 0))
+      .slice(0, limit),
+    mostActive: byValue,
+  };
 }

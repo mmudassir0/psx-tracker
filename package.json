@@ -17,7 +17,9 @@
     "test:portfolio": "DB_PATH=.scratch/test-portfolio.db tsx src/scripts/test-portfolio.ts",
     "test:recomposition": "DB_PATH=.scratch/test-recomposition.db tsx src/scripts/test-recomposition.ts",
     "test:strategy": "DB_PATH=.scratch/test-strategy.db tsx src/scripts/test-strategy.ts",
-    "test:payouts": "tsx src/scripts/test-payouts.ts"
+    "test:payouts": "tsx src/scripts/test-payouts.ts",
+    "seed:demo": "tsx src/scripts/seed-demo.ts",
+    "seed:clear": "tsx src/scripts/seed-demo.ts --clear"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.2",

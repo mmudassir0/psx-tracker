@@ -14,10 +14,17 @@ It reports market data and your own numbers. It does not give investment advice.
 | **Dashboard** | KMI30 level, advancers/decliners, day-change bars, sector weights, constituent table |
 | **Indices** | All 17 PSX indices with level, change and member count |
 | **Index** | Any index's level chart, constituents, weights, sector mix, day-change bars and membership changes |
+| **Screens** | 14 saved screens run on every ingest across the whole market, with a daily diff of what newly entered each one |
+| **Movers & breadth** | Market-wide gainers, losers, most active by traded value, plus advance/decline breadth |
 | **Screener** | Sort/filter on P/E, YTD, 1Y, weight, market cap, volume, distance off 52-week high |
 | **Symbol** | 5 years of price history, key stats, dividend yield, declared payouts with book-closure dates, 4 years of financials and ratios, announcement feed, your position |
 | **Portfolio** | Holdings with weighted-average cost, unrealised/realised P&L, dividend income, **your weight vs index weight** per stock and per sector |
 | **Strategy** | Backtest an index basket against the index itself, and get the exact trades to move your portfolio onto those weights |
+| **Risk** | Correlation matrix, beta vs index, and concentration — whether your positions are actually diversified |
+| **Liquidity** | Median daily traded value per name, and how many sessions a position would take to exit |
+| **Sectors** | Sector rollups and a page per sector |
+| **Watchlist** | Follow names you don't own, with drift since you added them |
+| **CGT** | Realised gains by Pakistani tax year, FIFO and weighted average side by side, CSV export |
 | **Zakat** | Zakat on your holdings, with every scholarly judgement call left as a parameter you set |
 | **Recomposition** | Detects when a stock is **dropped from an index** — for KMI30 that means it stopped meeting the Shariah screen |
 | **Calendar** | Dividends, bonus, rights, results, board meetings and AGMs — filterable by index, type, or just your holdings |
@@ -237,6 +244,26 @@ applied retroactively. The index line it is compared against has no such bias,
 so the two are not strictly comparable. Both lines are also **price return
 only** — dividends are excluded, because PSX announcement titles often omit the
 rate. The page states both caveats above the chart rather than burying them.
+
+**CGT is a working, not a return.** Pakistani CGT depends on holding period,
+acquisition date and filer status, none of which this models — it computes
+disposals and cost basis, not tax owed. Because tax rules may require FIFO
+while the portfolio pages use weighted average, both are shown side by side
+and neither is presented as the right one. The weighted-average total
+reconciles exactly with the portfolio page's realised P&L.
+
+**Liquidity is a volume proxy.** PSX publishes no order-book depth here, so the
+exit estimate is built from traded value and assumes you are 20% of a session.
+It does not model spread or your own market impact — treat it as an order of
+magnitude.
+
+**Correlations use shared sessions only.** A pair is measured on days when both
+names traded; anything under 30 overlapping sessions is marked with an asterisk
+because the number looks more precise than it is.
+
+**Notifications are macOS-only.** Alerts fire a native banner via `osascript`
+during an ingest. On any other platform it is a silent no-op, and a
+notification failure can never fail the ingest.
 
 **The zakat calculator takes no scholarly position.** Scholars differ on how
 zakat applies to shares, particularly whether full market value is assessed or

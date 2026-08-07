@@ -168,6 +168,15 @@ export function listAlerts() {
   return db.select().from(alerts).orderBy(desc(alerts.createdAt)).all();
 }
 
+/** Unread alert count, for the nav badge. */
+export function countUnacknowledgedEvents(): number {
+  return db
+    .select({ id: alertEvents.id })
+    .from(alertEvents)
+    .where(eq(alertEvents.acknowledged, false))
+    .all().length;
+}
+
 export function listAlertEvents(limit = 100) {
   return db
     .select()

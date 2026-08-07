@@ -110,3 +110,69 @@ export function getLatestMetricMap(
 export const METRIC_EPS_GROWTH = "EPS Growth (%)";
 export const METRIC_NET_MARGIN = "Net Profit Margin (%)";
 export const METRIC_EPS = "EPS";
+
+/**
+ * Revenue growth between the two most recent fiscal years.
+ *
+ * The revenue line item differs by sector — banks report "Mark-up Earned",
+ * insurers and holdings "Total Income", everyone else "Sales" — so the first
+ * of these a company actually reports is used. Without that fallback, banks
+ * would silently show no revenue growth at all.
+ */
+export const REVENUE_LINE_ITEMS = [
+  "Sales",
+  "Total Income",
+  "Mark-up Earned",
+] as const;
+
+export function getRevenueGrowthMap(
+  symbolList?: string[],
+): Map<string, number> {
+  const where = symbolList?.length
+    ? and(
+        inArray(financials.lineItem, [...REVENUE_LINE_ITEMS]),
+        inArray(financials.symbol, symbolList),
+      )
+    : inArray(financials.lineItem, [...REVENUE_LINE_ITEMS]);
+
+  const rows = db
+    .select({
+      symbol: financials.symbol,
+      year: financials.fiscalYear,
+      lineItem: financials.lineItem,
+      value: financials.value,
+    })
+    .from(financials)
+    .where(where)
+    .all();
+
+  // symbol -> line item -> year -> value
+  const bySymbol = new Map<string, Map<string, Map<string, number>>>();
+  for (const row of rows) {
+    if (row.value == null) continue;
+    const byItem = bySymbol.get(row.symbol) ?? new Map();
+    const byYear = byItem.get(row.lineItem) ?? new Map();
+    byYear.set(row.year, row.value);
+    byItem.set(row.lineItem, byYear);
+    bySymbol.set(row.symbol, byItem);
+  }
+
+  const out = new Map<string, number>();
+  for (const [symbol, byItem] of bySymbol) {
+    for (const item of REVENUE_LINE_ITEMS) {
+      const byYear = byItem.get(item);
+      if (!byYear || byYear.size < 2) continue;
+
+      const years = [...byYear.keys()].sort((a, b) => b.localeCompare(a));
+      const latest = byYear.get(years[0])!;
+      const prior = byYear.get(years[1])!;
+      // A non-positive base makes percentage growth meaningless.
+      if (prior <= 0) continue;
+
+      out.set(symbol, ((latest - prior) / prior) * 100);
+      break;
+    }
+  }
+
+  return out;
+}
