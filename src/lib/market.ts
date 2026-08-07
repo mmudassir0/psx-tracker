@@ -427,11 +427,15 @@ export function getSymbolMeta(symbol: string) {
 
 /** True when the local database has never been populated. */
 export function isDatabaseEmpty(): boolean {
-  const row = db
-    .select({ count: sql<number>`count(*)` })
-    .from(symbols)
-    .get();
-  return (row?.count ?? 0) === 0;
+  try {
+    const row = db
+      .select({ count: sql<number>`count(*)` })
+      .from(symbols)
+      .get();
+    return (row?.count ?? 0) === 0;
+  } catch {
+    return true;
+  }
 }
 
 /**

@@ -170,11 +170,15 @@ export function listAlerts() {
 
 /** Unread alert count, for the nav badge. */
 export function countUnacknowledgedEvents(): number {
-  return db
-    .select({ id: alertEvents.id })
-    .from(alertEvents)
-    .where(eq(alertEvents.acknowledged, false))
-    .all().length;
+  try {
+    return db
+      .select({ id: alertEvents.id })
+      .from(alertEvents)
+      .where(eq(alertEvents.acknowledged, false))
+      .all().length;
+  } catch {
+    return 0;
+  }
 }
 
 export function listAlertEvents(limit = 100) {
