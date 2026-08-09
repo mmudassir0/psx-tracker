@@ -17,14 +17,22 @@ function main() {
 
   // 2. Run Drizzle schema migrations
   console.log("Running database migrations...");
-  execSync("npx drizzle-kit push --force", { stdio: "inherit" });
+  try {
+    execSync("npx drizzle-kit push --force", { stdio: "inherit" });
+  } catch (err) {
+    console.error("Migration warning (continuing startup):", err);
+  }
 
-  // 3. Backfill data if database is empty
+  // 3. Populate initial data if database is empty
   if (isDatabaseEmpty()) {
-    console.log("Database is empty. Running initial market data backfill (~20s)...");
-    execSync("npx tsx src/scripts/ingest.ts --backfill", { stdio: "inherit" });
+    console.log("Database is empty. Running initial quick ingest...");
+    try {
+      execSync("npx tsx src/scripts/ingest.ts", { stdio: "inherit" });
+    } catch (err) {
+      console.warn("Initial ingest encountered warnings, continuing server boot.");
+    }
   } else {
-    console.log("Database initialized. Skipping backfill.");
+    console.log("Database already initialized.");
   }
 
   // 4. Start Next.js server
