@@ -49,6 +49,24 @@ export interface MarketWatchRow {
 }
 
 /**
+ * PSX appends corporate action flags to ticker symbols on the live market-watch page:
+ * - XD = Ex-Dividend (e.g. FFCXD -> FFC)
+ * - XB = Ex-Bonus (e.g. IPAKXB -> IPAK)
+ * - XR = Ex-Right (e.g. EPCLXR -> EPCL)
+ * - XA = Ex-All (Dividend + Bonus + Right)
+ *
+ * Normalise these to the base equity ticker so history, company pages, and holdings stay unified.
+ */
+export function normalizeSymbol(raw: string): string {
+  const trimmed = raw.trim().toUpperCase();
+  const match = trimmed.match(/^(.*)(XD|XB|XR|XA)$/);
+  if (match && match[1].length >= 2) {
+    return match[1];
+  }
+  return trimmed;
+}
+
+/**
  * Columns: SYMBOL | SECTOR | LISTED IN | LDCP | OPEN | HIGH | LOW | CURRENT |
  * CHANGE | CHANGE (%) | VOLUME
  */
@@ -63,9 +81,10 @@ export function parseMarketWatch(html: string): MarketWatchRow[] {
       .get();
     if (cells.length < 11) return;
 
-    const symbol = cells[0];
+    const rawSymbol = cells[0];
     // Skip header/footer rows that survive the cell-count check.
-    if (!symbol || !/^[A-Z0-9._-]{2,20}$/.test(symbol)) return;
+    if (!rawSymbol || !/^[A-Z0-9._-]{2,20}$/.test(rawSymbol)) return;
+    const symbol = normalizeSymbol(rawSymbol);
 
     const indexes = cells[2]
       .split(",")
@@ -247,7 +266,7 @@ export function parseCompanyPage(html: string): CompanyPage {
   return {
     // <h1> elements are section headings ("Company Profile"); the company's
     // own name lives in .quote__name.
-    name: clean($(".quote__name").first().text()) || null,
+    name: clean($(".quote__name").first().text()).replace(/(XD|XB|XR|XA)$/i, "").trim() || null,
     sectorName: extractSector($),
     peTtm: num(firstStat("P/E Ratio (TTM)")),
     marketCap: marketCapThousands == null ? null : marketCapThousands * 1000,
