@@ -60,21 +60,30 @@ export default async function SymbolPage({
   const meta = await getSymbolMeta(symbol);
   if (!meta) notFound();
 
-  const view = await getConstituent(symbol);
-  const history = await getPriceHistory(symbol);
-  const quoteDate = await latestQuoteDate();
+  const [
+    view,
+    history,
+    quoteDate,
+    news,
+    payoutRows,
+    companyFinancials,
+    portfolio,
+  ] = await Promise.all([
+    getConstituent(symbol),
+    getPriceHistory(symbol),
+    latestQuoteDate(),
+    db
+      .select()
+      .from(announcements)
+      .where(eq(announcements.symbol, symbol))
+      .orderBy(desc(announcements.date))
+      .limit(25)
+      .all(),
+    getPayouts(symbol, 15),
+    getCompanyFinancials(symbol),
+    getPortfolio(),
+  ]);
 
-  const news = await db
-    .select()
-    .from(announcements)
-    .where(eq(announcements.symbol, symbol))
-    .orderBy(desc(announcements.date))
-    .limit(25)
-    .all();
-
-  const payoutRows = await getPayouts(symbol, 15);
-  const companyFinancials = await getCompanyFinancials(symbol);
-  const portfolio = await getPortfolio();
   const holding = portfolio.holdings.find((h) => h.symbol === symbol);
 
   return (

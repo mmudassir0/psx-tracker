@@ -40,13 +40,17 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage() {
   if (await isDatabaseEmpty()) return <FirstRun />;
 
-  const constituents = await getConstituents();
-  const index = await getLatestIndexLevel();
-  const quoteDate = await latestQuoteDate();
+  const [constituents, index, portfolio, recomposition, lastIngest, quoteDate] =
+    await Promise.all([
+      getConstituents(),
+      getLatestIndexLevel(),
+      getPortfolio(),
+      detectRecomposition(),
+      getLastIngest(),
+      latestQuoteDate(),
+    ]);
+
   const sectors = getSectorBreakdown(constituents);
-  const portfolio = await getPortfolio();
-  const recomposition = await detectRecomposition();
-  const lastIngest = await getLastIngest();
 
   const advancers = constituents.filter((c) => (c.changePct ?? 0) > 0).length;
   const decliners = constituents.filter((c) => (c.changePct ?? 0) < 0).length;

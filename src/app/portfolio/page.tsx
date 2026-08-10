@@ -36,9 +36,11 @@ export default async function PortfolioPage() {
     );
   }
 
-  const portfolio = await getPortfolio();
-  const ledger = await listTransactions();
-  const constituents = await getConstituents();
+  const [portfolio, ledger, constituents] = await Promise.all([
+    getPortfolio(),
+    listTransactions(),
+    getConstituents(),
+  ]);
   const openPositions = portfolio.holdings.filter((h) => h.quantity > 0);
 
   return (

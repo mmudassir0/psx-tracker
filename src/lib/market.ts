@@ -85,6 +85,9 @@ export async function getTrackedIndexCodes(): Promise<string[]> {
 }
 
 interface ViewMaps {
+  symbols?: Map<string, typeof symbols.$inferSelect>;
+  quotes?: Map<string, typeof quotesDaily.$inferSelect>;
+  stats?: Map<string, typeof companyStats.$inferSelect>;
   dividends?: Map<string, number>;
   epsGrowth?: Map<string, number>;
   netMargin?: Map<string, number>;
@@ -96,9 +99,13 @@ export async function buildView(
   quoteDate: string | null,
   maps: ViewMaps = {},
 ): Promise<ConstituentView> {
-  const meta = await db.select().from(symbols).where(eq(symbols.symbol, symbol)).get();
+  const meta = maps.symbols
+    ? maps.symbols.get(symbol)
+    : await db.select().from(symbols).where(eq(symbols.symbol, symbol)).get();
 
-  const quote = quoteDate
+  const quote = maps.quotes
+    ? maps.quotes.get(symbol)
+    : quoteDate
     ? await db
         .select()
         .from(quotesDaily)
@@ -108,13 +115,15 @@ export async function buildView(
         .get()
     : undefined;
 
-  const stats = await db
-    .select()
-    .from(companyStats)
-    .where(eq(companyStats.symbol, symbol))
-    .orderBy(desc(companyStats.date))
-    .limit(1)
-    .get();
+  const stats = maps.stats
+    ? maps.stats.get(symbol)
+    : await db
+        .select()
+        .from(companyStats)
+        .where(eq(companyStats.symbol, symbol))
+        .orderBy(desc(companyStats.date))
+        .limit(1)
+        .get();
 
   const close = quote?.close ?? null;
   const ldcp = quote?.ldcp ?? null;
@@ -133,13 +142,16 @@ export async function buildView(
       ? ((stats.week52High - close) / stats.week52High) * 100
       : null;
 
-  const dps = (maps.dividends ?? (await getTrailingDividendMap())).get(symbol) ?? null;
+  const dps =
+    (maps.dividends ?? (await getTrailingDividendMap())).get(symbol) ?? null;
   const epsGrowth =
-    (maps.epsGrowth ?? (await getLatestMetricMap(METRIC_EPS_GROWTH))).get(symbol) ??
-    null;
+    (maps.epsGrowth ?? (await getLatestMetricMap(METRIC_EPS_GROWTH))).get(
+      symbol,
+    ) ?? null;
   const netMargin =
-    (maps.netMargin ?? (await getLatestMetricMap(METRIC_NET_MARGIN))).get(symbol) ??
-    null;
+    (maps.netMargin ?? (await getLatestMetricMap(METRIC_NET_MARGIN))).get(
+      symbol,
+    ) ?? null;
   const revenueGrowth =
     (maps.revenueGrowth ?? (await getRevenueGrowthMap())).get(symbol) ?? null;
 
@@ -179,6 +191,68 @@ export async function buildView(
   };
 }
 
+async function fetchBulkViewMaps(
+  symbolsList: string[],
+  quoteDate: string | null,
+): Promise<ViewMaps> {
+  if (symbolsList.length === 0) return {};
+
+  const [
+    symbolRows,
+    quoteRows,
+    statsRows,
+    dividends,
+    epsGrowth,
+    netMargin,
+    revenueGrowth,
+  ] = await Promise.all([
+    db
+      .select()
+      .from(symbols)
+      .where(inArray(symbols.symbol, symbolsList))
+      .all(),
+    quoteDate
+      ? db
+          .select()
+          .from(quotesDaily)
+          .where(
+            and(
+              eq(quotesDaily.date, quoteDate),
+              inArray(quotesDaily.symbol, symbolsList),
+            ),
+          )
+          .all()
+      : Promise.resolve([]),
+    db
+      .select()
+      .from(companyStats)
+      .where(inArray(companyStats.symbol, symbolsList))
+      .orderBy(desc(companyStats.date))
+      .all(),
+    getTrailingDividendMap(),
+    getLatestMetricMap(METRIC_EPS_GROWTH, symbolsList),
+    getLatestMetricMap(METRIC_NET_MARGIN, symbolsList),
+    getRevenueGrowthMap(symbolsList),
+  ]);
+
+  const symbolsMap = new Map(symbolRows.map((s) => [s.symbol, s]));
+  const quotesMap = new Map(quoteRows.map((q) => [q.symbol, q]));
+  const statsMap = new Map<string, typeof companyStats.$inferSelect>();
+  for (const s of statsRows) {
+    if (!statsMap.has(s.symbol)) statsMap.set(s.symbol, s);
+  }
+
+  return {
+    symbols: symbolsMap,
+    quotes: quotesMap,
+    stats: statsMap,
+    dividends,
+    epsGrowth,
+    netMargin,
+    revenueGrowth,
+  };
+}
+
 export async function getConstituents(
   indexCode: string = TRACKED_INDEX,
 ): Promise<ConstituentView[]> {
@@ -201,13 +275,10 @@ export async function getConstituents(
 
   if (members.length === 0) return [];
 
-  const maps: ViewMaps = {
-    dividends: await getTrailingDividendMap(),
-    epsGrowth: await getLatestMetricMap(METRIC_EPS_GROWTH, members),
-    netMargin: await getLatestMetricMap(METRIC_NET_MARGIN, members),
-    revenueGrowth: await getRevenueGrowthMap(members),
-  };
-  const rows = await Promise.all(members.map((symbol) => buildView(symbol, quoteDate, maps)));
+  const maps = await fetchBulkViewMaps(members, quoteDate);
+  const rows = await Promise.all(
+    members.map((symbol) => buildView(symbol, quoteDate, maps)),
+  );
 
   const totalCap = rows.reduce((sum, r) => sum + (r.freeFloatCap ?? 0), 0);
   if (totalCap > 0) {
@@ -226,19 +297,49 @@ export async function getConstituent(
   symbol: string,
   indexCode: string = TRACKED_INDEX,
 ): Promise<ConstituentView | null> {
-  const constituentsList = await getConstituents(indexCode);
-  const inIndex = constituentsList.find((c) => c.symbol === symbol);
-  if (inIndex) return inIndex;
-
-  const meta = await db.select().from(symbols).where(eq(symbols.symbol, symbol)).get();
+  const quoteDate = await latestQuoteDate();
+  const maps = await fetchBulkViewMaps([symbol], quoteDate);
+  const meta = maps.symbols?.get(symbol);
   if (!meta) return null;
-  return buildView(symbol, await latestQuoteDate());
+
+  const view = await buildView(symbol, quoteDate, maps);
+
+  const memberDate = await latestConstituentDate(indexCode);
+  if (memberDate) {
+    const isMember = await db
+      .select({ symbol: constituents.symbol })
+      .from(constituents)
+      .where(
+        and(
+          eq(constituents.indexCode, indexCode),
+          eq(constituents.date, memberDate),
+          eq(constituents.symbol, symbol),
+        ),
+      )
+      .limit(1)
+      .get();
+
+    if (isMember) {
+      const fullList = await getConstituents(indexCode);
+      const match = fullList.find((c) => c.symbol === symbol);
+      if (match) return match;
+    }
+  }
+
+  return view;
 }
 
 export async function getIndexesForSymbol(symbol: string): Promise<string[]> {
-  const meta = await db.select().from(symbols).where(eq(symbols.symbol, symbol)).get();
+  const meta = await db
+    .select()
+    .from(symbols)
+    .where(eq(symbols.symbol, symbol))
+    .get();
   if (!meta?.indexes) return [];
-  return meta.indexes.split(",").map((s) => s.trim()).filter(Boolean);
+  return meta.indexes
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 export interface PricePoint {
@@ -247,7 +348,10 @@ export interface PricePoint {
   volume: number | null;
 }
 
-export async function getPriceHistory(symbol: string, fromDate?: string): Promise<PricePoint[]> {
+export async function getPriceHistory(
+  symbol: string,
+  fromDate?: string,
+): Promise<PricePoint[]> {
   const where = fromDate
     ? and(eq(quotesDaily.symbol, symbol), gte(quotesDaily.date, fromDate))
     : eq(quotesDaily.symbol, symbol);
@@ -269,7 +373,10 @@ export async function getIndexHistory(
   fromDate?: string,
 ): Promise<{ date: string; current: number }[]> {
   const where = fromDate
-    ? and(eq(indexLevels.indexCode, indexCode), gte(indexLevels.date, fromDate))
+    ? and(
+        eq(indexLevels.indexCode, indexCode),
+        gte(indexLevels.date, fromDate),
+      )
     : eq(indexLevels.indexCode, indexCode);
 
   return await db
@@ -292,7 +399,10 @@ export async function getLatestIndexLevel(indexCode = TRACKED_INDEX) {
   );
 }
 
-export async function getYtdReturn(symbol: string, asOf: string): Promise<number | null> {
+export async function getYtdReturn(
+  symbol: string,
+  asOf: string,
+): Promise<number | null> {
   const history = await getPriceHistory(symbol, startOfYear(asOf));
   if (history.length < 2) return null;
   const first = history[0].close;
@@ -343,37 +453,54 @@ export async function getIndexSummaries(): Promise<IndexSummary[]> {
     .selectDistinct({ indexCode: indexLevels.indexCode })
     .from(indexLevels)
     .all();
-  const codes = new Set<string>([
-    ...trackedCodes,
-    ...levelRows.map((r) => r.indexCode),
-  ]);
+  const codes = [
+    ...new Set([...trackedCodes, ...levelRows.map((r) => r.indexCode)]),
+  ];
 
-  return Promise.all(
-    [...codes].map(async (code) => {
-      const level = await getLatestIndexLevel(code);
-      const snapshotDate = await latestConstituentDate(code);
-      const memberRows = snapshotDate
-        ? await db
-            .select({ symbol: constituents.symbol })
-            .from(constituents)
-            .where(
-              and(
-                eq(constituents.indexCode, code),
-                eq(constituents.date, snapshotDate),
-              ),
-            )
-            .all()
-        : [];
+  const allLevels = await db
+    .select()
+    .from(indexLevels)
+    .orderBy(desc(indexLevels.date))
+    .all();
+  const levelMap = new Map<string, typeof indexLevels.$inferSelect>();
+  for (const l of allLevels) {
+    if (!levelMap.has(l.indexCode)) levelMap.set(l.indexCode, l);
+  }
 
-      return {
-        code,
-        level: level?.current ?? null,
-        changePct: level?.changePct ?? null,
-        memberCount: memberRows.length,
-        snapshotDate,
-      };
-    }),
-  );
+  const allSnapshots = await db
+    .select({ indexCode: constituents.indexCode, date: constituents.date })
+    .from(constituents)
+    .orderBy(desc(constituents.date))
+    .all();
+  const snapshotDateMap = new Map<string, string>();
+  for (const s of allSnapshots) {
+    if (!snapshotDateMap.has(s.indexCode))
+      snapshotDateMap.set(s.indexCode, s.date);
+  }
+
+  const countsRows = await db
+    .select({
+      indexCode: constituents.indexCode,
+      date: constituents.date,
+      count: sql<number>`count(*)`,
+    })
+    .from(constituents)
+    .groupBy(constituents.indexCode, constituents.date)
+    .all();
+  const countMap = new Map<string, number>();
+  for (const c of countsRows) {
+    if (snapshotDateMap.get(c.indexCode) === c.date) {
+      countMap.set(c.indexCode, c.count);
+    }
+  }
+
+  return codes.map((code) => ({
+    code,
+    level: levelMap.get(code)?.current ?? null,
+    changePct: levelMap.get(code)?.changePct ?? null,
+    memberCount: countMap.get(code) ?? 0,
+    snapshotDate: snapshotDateMap.get(code) ?? null,
+  }));
 }
 
 export async function getLastIngest() {
@@ -388,7 +515,13 @@ export async function getLastIngest() {
 }
 
 export async function getSymbolMeta(symbol: string) {
-  return (await db.select().from(symbols).where(eq(symbols.symbol, symbol)).get()) ?? null;
+  return (
+    (await db
+      .select()
+      .from(symbols)
+      .where(eq(symbols.symbol, symbol))
+      .get()) ?? null
+  );
 }
 
 export async function isDatabaseEmpty(): Promise<boolean> {
@@ -416,14 +549,10 @@ export async function getAllSymbolViews(): Promise<ConstituentView[]> {
 
   if (universe.length === 0) return [];
 
-  const maps: ViewMaps = {
-    dividends: await getTrailingDividendMap(),
-    epsGrowth: await getLatestMetricMap(METRIC_EPS_GROWTH, universe),
-    netMargin: await getLatestMetricMap(METRIC_NET_MARGIN, universe),
-    revenueGrowth: await getRevenueGrowthMap(universe),
-  };
-
-  return Promise.all(universe.map((symbol) => buildView(symbol, quoteDate, maps)));
+  const maps = await fetchBulkViewMaps(universe, quoteDate);
+  return Promise.all(
+    universe.map((symbol) => buildView(symbol, quoteDate, maps)),
+  );
 }
 
 export interface MarketBreadth {
