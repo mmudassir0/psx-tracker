@@ -3,20 +3,10 @@ import { db } from "@/db";
 import { symbols } from "@/db/schema";
 import { getConstituents, type ConstituentView } from "@/lib/market";
 
-/**
- * Sector rollups.
- *
- * Sector names arrive from company pages, but the numeric sector CODE comes
- * from market-watch and is present for every symbol — so codes are the key and
- * names are a display nicety that may be missing for counters without a
- * company page.
- */
-
 export interface SectorSummary {
   code: string;
   name: string | null;
   memberCount: number;
-  /** Members held in the portfolio. */
   totalFreeFloatCap: number;
   avgChangePct: number | null;
   avgPe: number | null;
@@ -26,8 +16,8 @@ function sectorKey(row: ConstituentView): string {
   return row.sectorCode ?? "unknown";
 }
 
-export function getSectorSummaries(indexCode?: string): SectorSummary[] {
-  const rows = getConstituents(indexCode);
+export async function getSectorSummaries(indexCode?: string): Promise<SectorSummary[]> {
+  const rows = await getConstituents(indexCode);
   const groups = new Map<string, ConstituentView[]>();
 
   for (const row of rows) {
@@ -62,35 +52,35 @@ export function getSectorSummaries(indexCode?: string): SectorSummary[] {
     .sort((a, b) => b.totalFreeFloatCap - a.totalFreeFloatCap);
 }
 
-/** Every symbol in a sector, across all indices — not just one index. */
-export function getSectorMembers(code: string): ConstituentView[] {
-  const all = getConstituents("ALLSHR");
+export async function getSectorMembers(code: string): Promise<ConstituentView[]> {
+  const all = await getConstituents("ALLSHR");
   const inAllShr = all.filter((r) => (r.sectorCode ?? "unknown") === code);
   if (inAllShr.length > 0) return inAllShr;
-  // Fall back to KMI30 when ALLSHR has no snapshot yet.
-  return getConstituents().filter((r) => (r.sectorCode ?? "unknown") === code);
+  const kmi30 = await getConstituents();
+  return kmi30.filter((r) => (r.sectorCode ?? "unknown") === code);
 }
 
-export function getSectorName(code: string): string | null {
-  const row = db
+export async function getSectorName(code: string): Promise<string | null> {
+  const rows = await db
     .select({ name: symbols.sectorName })
     .from(symbols)
     .where(eq(symbols.sectorCode, code))
-    .all()
-    .find((r) => r.name);
+    .all();
+  const row = rows.find((r) => r.name);
   return row?.name ?? null;
 }
 
-/** Distinct sector codes with a name, for the index page. */
-export function listSectors(): { code: string; name: string | null }[] {
-  return db
+export async function listSectors(): Promise<{ code: string; name: string | null }[]> {
+  const rows = await db
     .select({
       code: symbols.sectorCode,
       name: sql<string | null>`max(${symbols.sectorName})`,
     })
     .from(symbols)
     .groupBy(symbols.sectorCode)
-    .all()
+    .all();
+
+  return rows
     .filter((r): r is { code: string; name: string | null } => r.code != null)
     .sort((a, b) => (a.name ?? a.code).localeCompare(b.name ?? b.code));
 }

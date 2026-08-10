@@ -6,14 +6,16 @@ import { Card, PageHeader, EmptyState } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default function NewScreenPage() {
-  if (isDatabaseEmpty()) {
+export default async function NewScreenPage() {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> before building screens.
       </EmptyState>
     );
   }
+
+  const previewRows = await toPreviewRows();
 
   return (
     <div className="flex flex-col gap-5">
@@ -28,7 +30,7 @@ export default function NewScreenPage() {
       />
 
       <Card>
-        <ScreenBuilder rows={toPreviewRows()} />
+        <ScreenBuilder rows={previewRows} />
       </Card>
 
       <p className="text-xs text-slate-500 dark:text-slate-400">

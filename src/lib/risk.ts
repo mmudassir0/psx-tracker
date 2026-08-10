@@ -6,25 +6,10 @@ import { getPortfolio } from "@/lib/portfolio";
 import { TRACKED_INDEX } from "@/lib/psx/ingest";
 import { addDays, todayPkt } from "@/lib/dates";
 
-/**
- * Correlation, beta and concentration for a set of holdings.
- *
- * All of it is computed from daily log-ish simple returns on stored closes.
- * Two honest limits, surfaced in the UI rather than hidden:
- *
- *  - Correlation is measured only on days where BOTH symbols traded. A thin
- *    name with few overlapping sessions produces a number that looks precise
- *    and isn't, so the overlap count travels with every pair.
- *  - Price return only. Dividends are excluded, which matters more for
- *    high-yield names than for the correlation structure itself.
- */
-
-/** Below this many overlapping sessions, a correlation is not trustworthy. */
 export const MIN_OVERLAP = 30;
 
 export interface ReturnSeries {
   symbol: string;
-  /** date -> simple return for that session. */
   returns: Map<string, number>;
 }
 
@@ -37,13 +22,13 @@ function toReturns(rows: { date: string; close: number }[]): Map<string, number>
   return out;
 }
 
-export function loadReturns(
+export async function loadReturns(
   symbols: string[],
   fromDate: string,
-): ReturnSeries[] {
+): Promise<ReturnSeries[]> {
   if (symbols.length === 0) return [];
 
-  const rows = db
+  const rows = await db
     .select({
       symbol: quotesDaily.symbol,
       date: quotesDaily.date,
@@ -78,7 +63,6 @@ export interface PairStat {
   overlap: number;
 }
 
-/** Pearson correlation over the dates both series share. */
 export function correlate(
   x: Map<string, number>,
   y: Map<string, number>,
@@ -116,11 +100,8 @@ export function correlate(
 
 export interface BetaStat {
   symbol: string;
-  /** Slope of the symbol's returns against the index's. */
   beta: number | null;
-  /** Share of the symbol's variance explained by the index. */
   rSquared: number | null;
-  /** Annualised standard deviation of daily returns, in percent. */
   volatilityPct: number | null;
   overlap: number;
 }
@@ -161,7 +142,6 @@ function computeBeta(
   const beta = varX > 0 ? cov / varX : null;
   const correlation =
     varX > 0 && varY > 0 ? cov / Math.sqrt(varX * varY) : null;
-  // ~252 PSX sessions a year.
   const volatilityPct = Math.sqrt(varY / (n - 1)) * Math.sqrt(252) * 100;
 
   return {
@@ -176,39 +156,32 @@ export interface RiskReport {
   symbols: string[];
   matrix: PairStat[];
   betas: BetaStat[];
-  /** Weighted average beta of the portfolio, by market value. */
   portfolioBeta: number | null;
-  /** Mean pairwise correlation across trustworthy pairs. */
   averageCorrelation: number | null;
-  /** Pairs above 0.7 — the "same bet twice" candidates. */
   highlyCorrelated: PairStat[];
-  /** Herfindahl index of portfolio weights, 0-1. Higher = more concentrated. */
   concentration: number;
-  /** Largest single position as a share of the portfolio. */
   topWeightPct: number;
   indexCode: string;
   fromDate: string;
-  /** Symbols dropped for having too little history to say anything. */
   excluded: string[];
 }
 
-export function buildRiskReport({
+export async function buildRiskReport({
   indexCode = TRACKED_INDEX,
   days = 365,
-}: { indexCode?: string; days?: number } = {}): RiskReport {
+}: { indexCode?: string; days?: number } = {}): Promise<RiskReport> {
   const fromDate = addDays(todayPkt(), -days);
-  const portfolio = getPortfolio();
+  const portfolio = await getPortfolio();
   const open = portfolio.holdings.filter((h) => h.quantity > 0);
   const wanted = open.map((h) => h.symbol);
 
-  const series = loadReturns(wanted, fromDate);
+  const series = await loadReturns(wanted, fromDate);
   const usable = series.filter((s) => s.returns.size >= MIN_OVERLAP);
   const symbols = usable.map((s) => s.symbol);
   const excluded = wanted.filter((s) => !symbols.includes(s));
 
   const bySymbol = new Map(usable.map((s) => [s.symbol, s.returns]));
 
-  // Pairwise correlations, upper triangle only.
   const matrix: PairStat[] = [];
   for (let i = 0; i < symbols.length; i++) {
     for (let j = i + 1; j < symbols.length; j++) {
@@ -220,9 +193,9 @@ export function buildRiskReport({
     }
   }
 
-  // Beta against the index level series.
+  const indexHistory = await getIndexHistory(indexCode, fromDate);
   const indexReturns = toReturns(
-    getIndexHistory(indexCode, fromDate).map((r) => ({
+    indexHistory.map((r) => ({
       date: r.date,
       close: r.current,
     })),
@@ -243,8 +216,6 @@ export function buildRiskReport({
   if (weighted.length > 0) {
     const covered = weighted.reduce((sum, b) => sum + weightOf(b.symbol), 0);
     if (covered > 0) {
-      // Renormalise across covered names so a missing beta doesn't drag the
-      // figure toward zero.
       portfolioBeta =
         weighted.reduce((sum, b) => sum + b.beta! * weightOf(b.symbol), 0) /
         covered;
@@ -283,7 +254,6 @@ export function buildRiskReport({
   };
 }
 
-/** Look up a pair in either order. */
 export function findPair(
   matrix: PairStat[],
   a: string,

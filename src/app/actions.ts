@@ -46,7 +46,6 @@ const transactionSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date"),
   type: z.enum(["buy", "sell", "dividend", "bonus", "rights"]),
   quantity: z.coerce.number().positive("Quantity must be greater than zero"),
-  // Bonus shares are issued at no cost, so zero is valid here.
   price: z.coerce.number().min(0, "Price cannot be negative"),
   fees: z.coerce.number().min(0).default(0),
   note: z.string().trim().max(200).optional(),
@@ -74,14 +73,14 @@ export async function addTransactionAction(
   }
 
   const input = parsed.data;
-  addTransaction({
+  await addTransaction({
     symbol: input.symbol,
     date: input.date,
     type: input.type as TransactionType,
     quantity: input.quantity,
     price: input.price,
     fees: input.fees,
-    note: input.note ?? null,
+    note: input.note ?? undefined,
   });
 
   revalidatePath("/portfolio");
@@ -94,7 +93,7 @@ export async function addTransactionAction(
 
 export async function deleteTransactionAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
-  if (id) deleteTransaction(id);
+  if (id) await deleteTransaction(id);
   revalidatePath("/portfolio");
   revalidatePath("/");
 }
@@ -152,16 +151,14 @@ export async function createAlertAction(
     return { ok: false, message: "This alert type needs a symbol" };
   }
 
-  createAlert({
+  await createAlert({
     symbol,
     kind: kind as AlertKind,
     threshold: membershipRule ? null : threshold,
     note: note ?? null,
   });
 
-  // Fire immediately if the condition already holds, rather than waiting
-  // for the next ingest.
-  evaluateAlerts();
+  await evaluateAlerts();
 
   revalidatePath("/alerts");
   return { ok: true, message: "Alert created" };
@@ -169,20 +166,20 @@ export async function createAlertAction(
 
 export async function deleteAlertAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
-  if (id) deleteAlert(id);
+  if (id) await deleteAlert(id);
   revalidatePath("/alerts");
 }
 
 export async function toggleAlertAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   const active = formData.get("active") === "true";
-  if (id) setAlertActive(id, active);
+  if (id) await setAlertActive(id, active);
   revalidatePath("/alerts");
 }
 
 export async function acknowledgeEventAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
-  if (id) acknowledgeEvent(id);
+  if (id) await acknowledgeEvent(id);
   revalidatePath("/alerts");
 }
 
@@ -215,7 +212,6 @@ export async function saveZakatSettingsAction(
     };
   }
 
-  // Per-symbol overrides arrive as zakatable_<SYMBOL> fields.
   const zakatablePct: Record<string, number> = {};
   for (const [key, value] of formData.entries()) {
     if (!key.startsWith("zakatable_")) continue;
@@ -237,21 +233,6 @@ export async function saveZakatSettingsAction(
   return { ok: true, message: "Saved" };
 }
 
-// ---------------------------------------------------------------------------
-// Ingest from the UI
-// ---------------------------------------------------------------------------
-
-/**
- * A full ingest takes minutes, so the button cannot await it — the request
- * would time out and the user would stare at a spinner with no feedback.
- * Instead the run is started in the background and its progress is written to
- * `ingest_runs`, which the client polls.
- *
- * This works because the app is a long-lived local Node process. It would not
- * survive a serverless deployment, which this is explicitly not.
- */
-
-/** A run stuck in "running" for longer than this is treated as dead. */
 const STALE_RUN_MS = 30 * 60 * 1000;
 
 export type IngestScope = "quick" | "kmi30" | "full";
@@ -272,9 +253,8 @@ export interface IngestStatus {
   trigger: string | null;
 }
 
-/** Current ingest state, whether started here, by the CLI, or by launchd. */
 export async function getIngestStatusAction(): Promise<IngestStatus> {
-  const run = db
+  const run = await db
     .select()
     .from(ingestRuns)
     .orderBy(desc(ingestRuns.startedAt))
@@ -307,13 +287,6 @@ export async function getIngestStatusAction(): Promise<IngestStatus> {
   };
 }
 
-/**
- * Kick off an ingest and return immediately.
- *
- * The concurrency guard reads the database rather than in-process state, so it
- * also refuses to start when the scheduled LaunchAgent run is already going —
- * two processes writing the same SQLite file is worth avoiding.
- */
 export async function startIngestAction(
   scope: IngestScope = "full",
 ): Promise<ActionState> {
@@ -339,14 +312,12 @@ export async function startIngestAction(
           }
         : { includeFundamentals: true };
 
-  // Deliberately not awaited: the action returns while the run continues.
   void runIngest({ ...options, trigger: "ui" })
-    .then(() => {
+    .then(async () => {
       try {
-        recordScreenHits();
-        notifyAlerts(evaluateAlerts());
+        await recordScreenHits();
+        notifyAlerts(await evaluateAlerts());
       } catch {
-        // Alert evaluation failing must not mark the ingest itself failed.
       }
     })
     .catch((err) => {
@@ -356,14 +327,9 @@ export async function startIngestAction(
   return { ok: true, message: `Started: ${SCOPE_LABELS[scope]}` };
 }
 
-/** Refresh the cached pages once a run finishes. */
 export async function revalidateAllAction() {
   revalidatePath("/", "layout");
 }
-
-// ---------------------------------------------------------------------------
-// Watchlist
-// ---------------------------------------------------------------------------
 
 export async function addToWatchlistAction(
   _prev: ActionState,
@@ -374,16 +340,15 @@ export async function addToWatchlistAction(
   if (!symbol) return { ok: false, message: "Symbol is required" };
 
   const { getConstituent } = await import("@/lib/market");
-  const view = getConstituent(symbol, "ALLSHR");
+  const view = await getConstituent(symbol, "ALLSHR");
   if (!view) {
     return { ok: false, message: `${symbol} is not a symbol PSX lists` };
   }
 
-  db.insert(watchlist)
+  await db.insert(watchlist)
     .values({
       symbol,
       note,
-      // Snapshot the price so drift since adding is measurable later.
       addedPrice: view.close ?? null,
       addedAt: new Date(),
     })
@@ -396,13 +361,9 @@ export async function addToWatchlistAction(
 
 export async function removeFromWatchlistAction(formData: FormData) {
   const symbol = String(formData.get("symbol") ?? "");
-  if (symbol) db.delete(watchlist).where(eq(watchlist.symbol, symbol)).run();
+  if (symbol) await db.delete(watchlist).where(eq(watchlist.symbol, symbol)).run();
   revalidatePath("/watchlist");
 }
-
-// ---------------------------------------------------------------------------
-// Custom screens
-// ---------------------------------------------------------------------------
 
 const screenRuleSchema = z.object({
   metric: z.enum([
@@ -429,7 +390,6 @@ const screenSchema = z.object({
   rules: z.array(screenRuleSchema).min(1, "Add at least one rule").max(8),
 });
 
-/** Rules arrive as a JSON string from the builder. */
 function parseScreenForm(formData: FormData) {
   let rules: unknown = [];
   try {
@@ -460,20 +420,20 @@ export async function saveScreenAction(
 
   const existingId = String(formData.get("id") ?? "").trim();
   if (existingId) {
-    updateCustomScreen(existingId, parsed.data);
+    await updateCustomScreen(existingId, parsed.data);
     revalidatePath("/screens");
     revalidatePath(`/screens/${existingId}`);
     return { ok: true, message: "Screen updated" };
   }
 
-  const id = createCustomScreen(parsed.data);
+  const id = await createCustomScreen(parsed.data);
   revalidatePath("/screens");
   redirect(`/screens/${id}`);
 }
 
 export async function deleteScreenAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
-  if (id) deleteCustomScreen(id);
+  if (id) await deleteCustomScreen(id);
   revalidatePath("/screens");
   redirect("/screens");
 }

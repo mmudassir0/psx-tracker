@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   const method: CostMethod =
     url.searchParams.get("method") === "fifo" ? "fifo" : "average";
 
-  const csv = disposalsToCsv(computeDisposals(method));
+  const csv = disposalsToCsv(await computeDisposals(method));
   const stamp = new Date().toISOString().slice(0, 10);
 
   return new Response(csv, {

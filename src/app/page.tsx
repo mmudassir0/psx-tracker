@@ -37,16 +37,16 @@ import {
 // Reads SQLite on every request; nothing here can be statically prerendered.
 export const dynamic = "force-dynamic";
 
-export default function DashboardPage() {
-  if (isDatabaseEmpty()) return <FirstRun />;
+export default async function DashboardPage() {
+  if (await isDatabaseEmpty()) return <FirstRun />;
 
-  const constituents = getConstituents();
-  const index = getLatestIndexLevel();
-  const quoteDate = latestQuoteDate();
+  const constituents = await getConstituents();
+  const index = await getLatestIndexLevel();
+  const quoteDate = await latestQuoteDate();
   const sectors = getSectorBreakdown(constituents);
-  const portfolio = getPortfolio();
-  const recomposition = detectRecomposition();
-  const lastIngest = getLastIngest();
+  const portfolio = await getPortfolio();
+  const recomposition = await detectRecomposition();
+  const lastIngest = await getLastIngest();
 
   const advancers = constituents.filter((c) => (c.changePct ?? 0) > 0).length;
   const decliners = constituents.filter((c) => (c.changePct ?? 0) < 0).length;

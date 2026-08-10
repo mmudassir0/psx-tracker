@@ -27,8 +27,8 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export default function PortfolioPage() {
-  if (isDatabaseEmpty()) {
+export default async function PortfolioPage() {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No market data yet">
         Run <code>npm run setup</code> first so holdings can be priced.
@@ -36,9 +36,9 @@ export default function PortfolioPage() {
     );
   }
 
-  const portfolio = getPortfolio();
-  const ledger = listTransactions();
-  const constituents = getConstituents();
+  const portfolio = await getPortfolio();
+  const ledger = await listTransactions();
+  const constituents = await getConstituents();
   const openPositions = portfolio.holdings.filter((h) => h.quantity > 0);
 
   return (

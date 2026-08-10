@@ -53,7 +53,7 @@ export default async function CalendarPage({
 }: {
   searchParams: Promise<{ filter?: string; scope?: string; index?: string }>;
 }) {
-  if (isDatabaseEmpty()) {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> to pull announcements.
@@ -67,13 +67,14 @@ export default async function CalendarPage({
     index: indexParam,
   } = await searchParams;
 
-  const availableIndices = sortIndexCodes(getTrackedIndexCodes());
+  const trackedCodes = await getTrackedIndexCodes();
+  const availableIndices = sortIndexCodes(trackedCodes);
   const indexCode =
     indexParam && availableIndices.includes(indexParam.toUpperCase())
       ? indexParam.toUpperCase()
       : null;
 
-  const portfolio = getPortfolio();
+  const portfolio = await getPortfolio();
   const held = portfolio.holdings
     .filter((h) => h.quantity > 0)
     .map((h) => h.symbol);
@@ -88,7 +89,7 @@ export default async function CalendarPage({
 
   // Scope to an index by restricting to its current constituents.
   const indexMembers = indexCode
-    ? getConstituents(indexCode).map((c) => c.symbol)
+    ? (await getConstituents(indexCode)).map((c) => c.symbol)
     : null;
   if (indexMembers && indexMembers.length > 0)
     conditions.push(inArray(announcements.symbol, indexMembers));
@@ -99,7 +100,7 @@ export default async function CalendarPage({
 
   const rows = noResultsPossible
     ? []
-    : db
+    : await db
         .select()
         .from(announcements)
         .where(and(...conditions))
@@ -108,7 +109,7 @@ export default async function CalendarPage({
         .all();
 
   const heldSet = new Set(held);
-  const allClosures = getUpcomingBookClosures(todayPkt(), 60);
+  const allClosures = await getUpcomingBookClosures(todayPkt(), 60);
   const bookClosures = (
     indexMembers ? allClosures.filter((p) => indexMembers.includes(p.symbol)) : allClosures
   ).filter((p) => (scope === "held" ? heldSet.has(p.symbol) : true));

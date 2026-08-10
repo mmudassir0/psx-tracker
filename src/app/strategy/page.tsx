@@ -51,7 +51,7 @@ export default async function StrategyPage({
     tolerance?: string;
   }>;
 }) {
-  if (isDatabaseEmpty()) {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> to populate price history.
@@ -60,7 +60,8 @@ export default async function StrategyPage({
   }
 
   const sp = await searchParams;
-  const available = sortIndexCodes(getTrackedIndexCodes());
+  const trackedCodes = await getTrackedIndexCodes();
+  const available = sortIndexCodes(trackedCodes);
   const indexCode =
     sp.index && available.includes(sp.index.toUpperCase())
       ? sp.index.toUpperCase()
@@ -80,14 +81,14 @@ export default async function StrategyPage({
     : "none";
   const tolerance = Number(sp.tolerance) >= 0 ? Number(sp.tolerance) : 0.5;
 
-  const backtest = runBacktest({
+  const backtest = await runBacktest({
     indexCode,
     startDate: addDays(todayPkt(), -windowDays),
     weighting,
     rebalance,
   });
 
-  const plan = planRebalance({ indexCode, weighting, tolerancePct: tolerance });
+  const plan = await planRebalance({ indexCode, weighting, tolerancePct: tolerance });
   const tradeRows = plan.rows.filter((r) => r.action !== "hold");
 
   const base = (overrides: Record<string, string>) => {

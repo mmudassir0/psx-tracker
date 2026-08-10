@@ -22,9 +22,10 @@ export const metadata: Metadata = {
     "Personal dashboard for PSX KMI30 constituents, portfolio and Shariah recomposition tracking.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
   // Guarded: the layout renders before the first ingest, when no tables exist.
-  const unreadAlerts = isDatabaseEmpty() ? 0 : countUnacknowledgedEvents();
+  const empty = await isDatabaseEmpty();
+  const unreadAlerts = empty ? 0 : await countUnacknowledgedEvents();
 
   return (
     <html

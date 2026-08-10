@@ -84,7 +84,7 @@ async function main() {
     );
   }
 
-  const recomp = detectRecomposition();
+  const recomp = await detectRecomposition();
   if (recomp.added.length || recomp.dropped.length) {
     console.log("\n*** KMI30 RECOMPOSITION DETECTED ***");
     console.log(`  ${recomp.previousDate} -> ${recomp.currentDate}`);
@@ -94,10 +94,10 @@ async function main() {
   }
 
   // Snapshot screen matches so tomorrow can diff against today.
-  const screenHitCount = recordScreenHits();
+  const screenHitCount = await recordScreenHits();
   if (screenHitCount > 0) console.log(`\nscreen matches recorded: ${screenHitCount}`);
 
-  const fired = evaluateAlerts();
+  const fired = await evaluateAlerts();
   notifyAlerts(fired);
   notifyIngestComplete(
     `${result.constituentCount} constituents, ${result.quotesWritten} quotes`,

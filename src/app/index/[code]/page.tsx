@@ -38,7 +38,7 @@ export default async function IndexPage({
 }: {
   params: Promise<{ code: string }>;
 }) {
-  if (isDatabaseEmpty()) {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> to populate the database.
@@ -49,18 +49,20 @@ export default async function IndexPage({
   const { code: raw } = await params;
   const code = raw.toUpperCase();
 
-  const known = new Set(getTrackedIndexCodes());
+  const trackedCodes = await getTrackedIndexCodes();
+  const known = new Set(trackedCodes);
   if (!known.has(code)) notFound();
 
   const meta = getIndexMeta(code);
-  const constituents = getConstituents(code);
-  const level = getLatestIndexLevel(code);
+  const constituents = await getConstituents(code);
+  const level = await getLatestIndexLevel(code);
   const sectors = getSectorBreakdown(constituents);
-  const snapshotDate = latestConstituentDate(code);
-  const recomposition = getRecompositionHistory(code);
-  const levelHistory = getIndexHistory(code);
+  const snapshotDate = await latestConstituentDate(code);
+  const recomposition = await getRecompositionHistory(code);
+  const levelHistory = await getIndexHistory(code);
+  const quoteDate = await latestQuoteDate();
 
-  const portfolio = getPortfolio();
+  const portfolio = await getPortfolio();
   const held = new Set(
     portfolio.holdings.filter((h) => h.quantity > 0).map((h) => h.symbol),
   );
@@ -73,6 +75,9 @@ export default async function IndexPage({
     .filter((c) => c.changePct != null)
     .sort((a, b) => (b.changePct ?? 0) - (a.changePct ?? 0));
 
+  const topGainers = byChange.slice(0, 5);
+  const topLosers = [...byChange].reverse().slice(0, 5);
+
   // A 400-name index would make an unreadable bar chart; show the extremes.
   const MAX_BARS = 40;
   const truncated = byChange.length > MAX_BARS;
@@ -81,14 +86,12 @@ export default async function IndexPage({
     : byChange;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       <PageHeader
         title={meta.name ?? code}
         description={
           <>
-            {meta.name && <span className="font-mono">{code}</span>}
-            {meta.name && " · "}
-            {meta.note ?? "PSX index"}
+            {meta.name ? code : "PSX index code"}
             {meta.shariah && (
               <>
                 {" "}
@@ -96,7 +99,7 @@ export default async function IndexPage({
               </>
             )}
             {" · Session "}
-            {prettyDate(latestQuoteDate())}
+            {prettyDate(quoteDate)}
           </>
         }
         actions={

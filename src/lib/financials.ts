@@ -2,14 +2,6 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { financials } from "@/db/schema";
 
-/**
- * Annual financials and ratios.
- *
- * Line items vary by sector, so nothing here assumes a fixed set: callers ask
- * for a named line item and get null if that company doesn't report it. A bank
- * has no "Sales" row, and a manufacturer has no "Mark-up Earned".
- */
-
 export interface FinancialSeries {
   lineItem: string;
   unit: string;
@@ -23,8 +15,8 @@ export interface CompanyFinancials {
   ratios: FinancialSeries[];
 }
 
-export function getCompanyFinancials(symbol: string): CompanyFinancials {
-  const rows = db
+export async function getCompanyFinancials(symbol: string): Promise<CompanyFinancials> {
+  const rows = await db
     .select()
     .from(financials)
     .where(eq(financials.symbol, symbol))
@@ -52,11 +44,11 @@ export function getCompanyFinancials(symbol: string): CompanyFinancials {
 }
 
 /** Value of one line item in the most recent fiscal year we have. */
-export function getLatestMetric(
+export async function getLatestMetric(
   symbol: string,
   lineItem: string,
-): number | null {
-  const row = db
+): Promise<number | null> {
+  const row = await db
     .select({ value: financials.value, year: financials.fiscalYear })
     .from(financials)
     .where(
@@ -72,10 +64,10 @@ export function getLatestMetric(
  * Latest value of a line item for many symbols at once.
  * Used to add fundamental columns to the screener without N queries.
  */
-export function getLatestMetricMap(
+export async function getLatestMetricMap(
   lineItem: string,
   symbolList?: string[],
-): Map<string, number> {
+): Promise<Map<string, number>> {
   const where = symbolList?.length
     ? and(
         eq(financials.lineItem, lineItem),
@@ -83,7 +75,7 @@ export function getLatestMetricMap(
       )
     : eq(financials.lineItem, lineItem);
 
-  const rows = db
+  const rows = await db
     .select({
       symbol: financials.symbol,
       year: financials.fiscalYear,
@@ -111,23 +103,15 @@ export const METRIC_EPS_GROWTH = "EPS Growth (%)";
 export const METRIC_NET_MARGIN = "Net Profit Margin (%)";
 export const METRIC_EPS = "EPS";
 
-/**
- * Revenue growth between the two most recent fiscal years.
- *
- * The revenue line item differs by sector — banks report "Mark-up Earned",
- * insurers and holdings "Total Income", everyone else "Sales" — so the first
- * of these a company actually reports is used. Without that fallback, banks
- * would silently show no revenue growth at all.
- */
 export const REVENUE_LINE_ITEMS = [
   "Sales",
   "Total Income",
   "Mark-up Earned",
 ] as const;
 
-export function getRevenueGrowthMap(
+export async function getRevenueGrowthMap(
   symbolList?: string[],
-): Map<string, number> {
+): Promise<Map<string, number>> {
   const where = symbolList?.length
     ? and(
         inArray(financials.lineItem, [...REVENUE_LINE_ITEMS]),
@@ -135,7 +119,7 @@ export function getRevenueGrowthMap(
       )
     : inArray(financials.lineItem, [...REVENUE_LINE_ITEMS]);
 
-  const rows = db
+  const rows = await db
     .select({
       symbol: financials.symbol,
       year: financials.fiscalYear,
@@ -166,7 +150,6 @@ export function getRevenueGrowthMap(
       const years = [...byYear.keys()].sort((a, b) => b.localeCompare(a));
       const latest = byYear.get(years[0])!;
       const prior = byYear.get(years[1])!;
-      // A non-positive base makes percentage growth meaningless.
       if (prior <= 0) continue;
 
       out.set(symbol, ((latest - prior) / prior) * 100);

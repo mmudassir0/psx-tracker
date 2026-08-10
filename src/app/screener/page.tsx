@@ -4,8 +4,8 @@ import { Card, EmptyState, PageHeader } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default function ScreenerPage() {
-  if (isDatabaseEmpty()) {
+export default async function ScreenerPage() {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> to populate the database.
@@ -13,7 +13,7 @@ export default function ScreenerPage() {
     );
   }
 
-  const rows = getConstituents();
+  const rows = await getConstituents();
 
   return (
     <div>

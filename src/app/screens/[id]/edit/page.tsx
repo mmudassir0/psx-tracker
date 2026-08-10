@@ -12,7 +12,7 @@ export default async function EditScreenPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  if (isDatabaseEmpty()) {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> first.
@@ -21,8 +21,10 @@ export default async function EditScreenPage({
   }
 
   const { id } = await params;
-  const screen = getScreen(id);
+  const screen = await getScreen(id);
   if (!screen) notFound();
+
+  const previewRows = await toPreviewRows();
 
   // Built-ins live in code, so editing one here would silently do nothing.
   if (screen.builtIn) {
@@ -65,7 +67,7 @@ export default async function EditScreenPage({
 
       <Card>
         <ScreenBuilder
-          rows={toPreviewRows()}
+          rows={previewRows}
           existing={{
             id: screen.id,
             name: screen.name,

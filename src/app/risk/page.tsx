@@ -31,7 +31,7 @@ export default async function RiskPage({
 }: {
   searchParams: Promise<{ window?: string }>;
 }) {
-  if (isDatabaseEmpty()) {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> to populate price history.
@@ -45,7 +45,7 @@ export default async function RiskPage({
     : "365";
   const days = WINDOWS.find((w) => w.key === windowKey)!.days;
 
-  const portfolio = getPortfolio();
+  const portfolio = await getPortfolio();
   const open = portfolio.holdings.filter((h) => h.quantity > 0);
 
   if (open.length === 0) {
@@ -65,7 +65,7 @@ export default async function RiskPage({
     );
   }
 
-  const report = buildRiskReport({ days });
+  const report = await buildRiskReport({ days });
 
   // Herfindahl: 1/n is perfectly even, 1 is everything in one name.
   const evenHhi = open.length > 0 ? 1 / open.length : 0;

@@ -5,22 +5,6 @@ import { getConstituents, getIndexHistory } from "@/lib/market";
 import { getPortfolio } from "@/lib/portfolio";
 import { TRACKED_INDEX } from "@/lib/psx/ingest";
 
-/**
- * Historical simulation over stored daily closes.
- *
- * Two limitations are structural, not bugs, and the UI states both:
- *
- *  1. SURVIVORSHIP BIAS. The universe is an index's constituents *today*.
- *     Membership snapshots only start when the app was first run, so past
- *     membership is unknown — companies that were dropped along the way are
- *     absent, which flatters the basket. The index level series it is compared
- *     against has no such bias, so the comparison is not apples to apples.
- *
- *  2. PRICE RETURN ONLY. Dividends are excluded, because PSX announcement
- *     titles frequently omit the rate. Both the basket and the index series
- *     are price-return, so the comparison is at least consistent.
- */
-
 export type Weighting = "index" | "equal";
 export type RebalanceFrequency = "none" | "monthly" | "quarterly" | "annually";
 
@@ -34,9 +18,7 @@ export interface BacktestOptions {
 
 export interface EquityPoint {
   date: string;
-  /** Simulated basket value. */
   strategy: number;
-  /** Index level rebased to the same starting capital. */
   benchmark: number | null;
 }
 
@@ -52,9 +34,7 @@ export interface BacktestResult {
   points: EquityPoint[];
   strategy: BacktestMetrics;
   benchmark: BacktestMetrics | null;
-  /** Symbols included in the simulation. */
   included: string[];
-  /** Constituents dropped for having no price on the start date. */
   excluded: string[];
   rebalanceDates: string[];
   startDate: string;
@@ -62,14 +42,13 @@ export interface BacktestResult {
   tradingDays: number;
 }
 
-/** Closes for a set of symbols from `startDate`, keyed by date then symbol. */
-function loadPriceMatrix(
+async function loadPriceMatrix(
   symbols: string[],
   startDate: string,
-): Map<string, Map<string, number>> {
+): Promise<Map<string, Map<string, number>>> {
   if (symbols.length === 0) return new Map();
 
-  const rows = db
+  const rows = await db
     .select({
       date: quotesDaily.date,
       symbol: quotesDaily.symbol,
@@ -94,7 +73,6 @@ function loadPriceMatrix(
   return byDate;
 }
 
-/** True when `date` opens a new month/quarter/year relative to `previous`. */
 function isRebalanceBoundary(
   previous: string,
   date: string,
@@ -106,11 +84,10 @@ function isRebalanceBoundary(
 
   if (frequency === "monthly") return cy !== py || cm !== pm;
   if (frequency === "annually") return cy !== py;
-  // quarterly
   return cy !== py || Math.floor((cm - 1) / 3) !== Math.floor((pm - 1) / 3);
 }
 
-export function runBacktest(options: BacktestOptions): BacktestResult {
+export async function runBacktest(options: BacktestOptions): Promise<BacktestResult> {
   const {
     indexCode = TRACKED_INDEX,
     startDate,
@@ -119,9 +96,9 @@ export function runBacktest(options: BacktestOptions): BacktestResult {
     rebalance = "none",
   } = options;
 
-  const constituents = getConstituents(indexCode);
+  const constituents = await getConstituents(indexCode);
   const allSymbols = constituents.map((c) => c.symbol);
-  const matrix = loadPriceMatrix(allSymbols, startDate);
+  const matrix = await loadPriceMatrix(allSymbols, startDate);
   const dates = [...matrix.keys()].sort();
 
   const empty: BacktestResult = {
@@ -138,12 +115,10 @@ export function runBacktest(options: BacktestOptions): BacktestResult {
   if (dates.length < 2) return empty;
 
   const firstDay = matrix.get(dates[0])!;
-  // A symbol with no price on day one cannot be bought, so it sits out.
   const included = allSymbols.filter((s) => firstDay.has(s));
   const excluded = allSymbols.filter((s) => !firstDay.has(s));
   if (included.length === 0) return empty;
 
-  // Target weights, normalised across the symbols we can actually hold.
   const targets = new Map<string, number>();
   if (weighting === "equal") {
     for (const s of included) targets.set(s, 1 / included.length);
@@ -159,20 +134,17 @@ export function runBacktest(options: BacktestOptions): BacktestResult {
     }
   }
 
-  // Buy on day one.
   const shares = new Map<string, number>();
   for (const s of included) {
     const price = firstDay.get(s)!;
     shares.set(s, price > 0 ? (initialCapital * targets.get(s)!) / price : 0);
   }
 
-  // Carry the last known price so a symbol that stops trading holds its value
-  // rather than silently vanishing from the basket.
   const lastPrice = new Map<string, number>(
     included.map((s) => [s, firstDay.get(s)!]),
   );
 
-  const indexHistory = getIndexHistory(indexCode, startDate);
+  const indexHistory = await getIndexHistory(indexCode, startDate);
   const indexByDate = new Map(indexHistory.map((r) => [r.date, r.current]));
   const indexStart = indexByDate.get(dates[0]) ?? null;
 
@@ -203,7 +175,6 @@ export function runBacktest(options: BacktestOptions): BacktestResult {
           : null,
     });
 
-    // Rebalance at the close, effective for subsequent days.
     if (
       i > 0 &&
       rebalance !== "none" &&
@@ -218,77 +189,27 @@ export function runBacktest(options: BacktestOptions): BacktestResult {
     }
   }
 
-  const strategySeries = points.map((p) => p.strategy);
-  const benchmarkSeries = points
-    .map((p) => p.benchmark)
-    .filter((v): v is number => v != null);
+  const strategyMetrics = computeMetrics(
+    points.map((p) => p.strategy),
+    initialCapital,
+  );
 
-  const years = yearsBetween(dates[0], dates[dates.length - 1]);
+  const benchValues = points.map((p) => p.benchmark).filter((v): v is number => v != null);
+  const benchmarkMetrics =
+    benchValues.length === points.length
+      ? computeMetrics(benchValues, initialCapital)
+      : null;
 
   return {
     points,
-    strategy: computeMetrics(strategySeries, years),
-    benchmark:
-      benchmarkSeries.length >= 2
-        ? computeMetrics(benchmarkSeries, years)
-        : null,
+    strategy: strategyMetrics,
+    benchmark: benchmarkMetrics,
     included,
     excluded,
     rebalanceDates,
     startDate: dates[0],
     endDate: dates[dates.length - 1],
     tradingDays: dates.length,
-  };
-}
-
-function yearsBetween(from: string, to: string): number {
-  const ms = Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`);
-  return Math.max(ms / (365.25 * 86_400_000), 1 / 365.25);
-}
-
-/** Exported for testing: metrics from a bare equity series. */
-export function computeMetrics(
-  series: number[],
-  years: number,
-): BacktestMetrics {
-  if (series.length < 2) return emptyMetrics();
-
-  const first = series[0];
-  const last = series[series.length - 1];
-  const totalReturnPct = first > 0 ? ((last - first) / first) * 100 : 0;
-  const cagrPct =
-    first > 0 && last > 0 ? (Math.pow(last / first, 1 / years) - 1) * 100 : 0;
-
-  let peak = series[0];
-  let maxDrawdown = 0;
-  const dailyReturns: number[] = [];
-
-  for (let i = 0; i < series.length; i++) {
-    const value = series[i];
-    if (value > peak) peak = value;
-    if (peak > 0) {
-      const drawdown = (peak - value) / peak;
-      if (drawdown > maxDrawdown) maxDrawdown = drawdown;
-    }
-    if (i > 0 && series[i - 1] > 0) {
-      dailyReturns.push(value / series[i - 1] - 1);
-    }
-  }
-
-  const mean =
-    dailyReturns.reduce((sum, r) => sum + r, 0) / (dailyReturns.length || 1);
-  const variance =
-    dailyReturns.reduce((sum, r) => sum + (r - mean) ** 2, 0) /
-    (dailyReturns.length > 1 ? dailyReturns.length - 1 : 1);
-  // ~252 PSX trading sessions a year.
-  const volatilityPct = Math.sqrt(variance) * Math.sqrt(252) * 100;
-
-  return {
-    totalReturnPct,
-    cagrPct,
-    maxDrawdownPct: maxDrawdown * 100,
-    volatilityPct,
-    finalValue: last,
   };
 }
 
@@ -302,9 +223,51 @@ function emptyMetrics(): BacktestMetrics {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Rebalance planner — what to trade to reach a target allocation today
-// ---------------------------------------------------------------------------
+export function computeMetrics(
+  series: number[],
+  initialCapital: number,
+): BacktestMetrics {
+  if (series.length < 2) return emptyMetrics();
+
+  const finalValue = series[series.length - 1];
+  const totalReturnPct = ((finalValue - initialCapital) / initialCapital) * 100;
+
+  const years = series.length / 252;
+  const cagrPct =
+    years > 0 && finalValue > 0
+      ? (Math.pow(finalValue / initialCapital, 1 / years) - 1) * 100
+      : 0;
+
+  let peak = series[0];
+  let maxDrawdownPct = 0;
+
+  const dailyReturns: number[] = [];
+  for (let i = 1; i < series.length; i++) {
+    const prev = series[i - 1];
+    if (prev > 0) dailyReturns.push(series[i] / prev - 1);
+
+    if (series[i] > peak) peak = series[i];
+    const drawdown = peak > 0 ? (peak - series[i]) / peak : 0;
+    if (drawdown > maxDrawdownPct) maxDrawdownPct = drawdown;
+  }
+
+  const n = dailyReturns.length;
+  let volatilityPct = 0;
+  if (n > 1) {
+    const mean = dailyReturns.reduce((s, r) => s + r, 0) / n;
+    const variance =
+      dailyReturns.reduce((s, r) => s + (r - mean) ** 2, 0) / (n - 1);
+    volatilityPct = Math.sqrt(variance) * Math.sqrt(252) * 100;
+  }
+
+  return {
+    totalReturnPct,
+    cagrPct,
+    maxDrawdownPct: maxDrawdownPct * 100,
+    volatilityPct,
+    finalValue,
+  };
+}
 
 export interface RebalanceRow {
   symbol: string;
@@ -316,7 +279,6 @@ export interface RebalanceRow {
   targetWeightPct: number;
   driftPct: number;
   targetValue: number;
-  /** Positive = buy, negative = sell. Whole shares only. */
   tradeShares: number;
   tradeValue: number;
   action: "buy" | "sell" | "hold";
@@ -325,20 +287,13 @@ export interface RebalanceRow {
 export interface RebalancePlan {
   rows: RebalanceRow[];
   portfolioValue: number;
-  /** Sum of absolute trade values as a share of the portfolio. */
   turnoverPct: number;
   totalBuy: number;
   totalSell: number;
-  /** Names in the index you do not hold at all. */
   missing: string[];
 }
 
-/**
- * Trades needed to move today's portfolio onto an index's weights.
- * Only positions drifting more than `tolerancePct` are traded, which is what
- * stops a rebalance from generating a wall of trivial orders.
- */
-export function planRebalance({
+export async function planRebalance({
   indexCode = TRACKED_INDEX,
   weighting = "index",
   tolerancePct = 0.5,
@@ -348,9 +303,9 @@ export function planRebalance({
   weighting?: Weighting;
   tolerancePct?: number;
   includeMissing?: boolean;
-} = {}): RebalancePlan {
-  const portfolio = getPortfolio();
-  const constituents = getConstituents(indexCode);
+} = {}): Promise<RebalancePlan> {
+  const portfolio = await getPortfolio();
+  const constituents = await getConstituents(indexCode);
   const held = portfolio.holdings.filter((h) => h.quantity > 0);
   const portfolioValue = held.reduce((sum, h) => sum + (h.marketValue ?? 0), 0);
 

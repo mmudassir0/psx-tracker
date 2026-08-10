@@ -17,7 +17,7 @@ export default async function SectorPage({
 }: {
   params: Promise<{ code: string }>;
 }) {
-  if (isDatabaseEmpty()) {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> to populate the database.
@@ -26,11 +26,11 @@ export default async function SectorPage({
   }
 
   const { code } = await params;
-  const members = getSectorMembers(code);
-  if (members.length === 0) notFound();
+  const members = await getSectorMembers(code);
+  if (members.length === 0) return notFound();
 
-  const name = getSectorName(code);
-  const portfolio = getPortfolio();
+  const name = await getSectorName(code);
+  const portfolio = await getPortfolio();
   const held = new Set(
     portfolio.holdings.filter((h) => h.quantity > 0).map((h) => h.symbol),
   );
@@ -44,11 +44,13 @@ export default async function SectorPage({
     .sort((a, b) => (b.changePct ?? 0) - (a.changePct ?? 0))
     .slice(0, 30);
 
+  const quoteDate = await latestQuoteDate();
+
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
         title={sectorLabel(name, code)}
-        description={`PSX sector ${code} · session ${prettyDate(latestQuoteDate())}`}
+        description={`PSX sector ${code} · session ${prettyDate(quoteDate)}`}
         actions={
           <Link href="/sectors" className="text-xs underline underline-offset-2">
             ← All sectors

@@ -12,8 +12,8 @@ import { money, pct, prettyDate, toneClass } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-export default function WatchlistPage() {
-  if (isDatabaseEmpty()) {
+export default async function WatchlistPage() {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> to populate the database.
@@ -21,18 +21,20 @@ export default function WatchlistPage() {
     );
   }
 
-  const rows = db.select().from(watchlist).orderBy(desc(watchlist.addedAt)).all();
-  const universe = getConstituents("ALLSHR");
+  const rows = await db.select().from(watchlist).orderBy(desc(watchlist.addedAt)).all();
+  const universe = await getConstituents("ALLSHR");
   const suggestions = universe.map((c) => c.symbol);
 
-  const enriched = rows.map((row) => {
-    const view = getConstituent(row.symbol, "ALLSHR");
-    const since =
-      row.addedPrice && view?.close != null && row.addedPrice > 0
-        ? ((view.close - row.addedPrice) / row.addedPrice) * 100
-        : null;
-    return { ...row, view, since };
-  });
+  const enriched = await Promise.all(
+    rows.map(async (row) => {
+      const view = await getConstituent(row.symbol, "ALLSHR");
+      const since =
+        row.addedPrice && view?.close != null && row.addedPrice > 0
+          ? ((view.close - row.addedPrice) / row.addedPrice) * 100
+          : null;
+      return { ...row, view, since };
+    }),
+  );
 
   return (
     <div className="flex flex-col gap-5">

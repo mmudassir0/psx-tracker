@@ -772,13 +772,13 @@ function writePayout(symbol: string, p: PayoutRow) {
  * Compare the two most recent membership snapshots.
  * `added`/`dropped` are empty when there is only one snapshot so far.
  */
-export function detectRecomposition(indexCode = TRACKED_INDEX): {
+export async function detectRecomposition(indexCode = TRACKED_INDEX): Promise<{
   previousDate: string | null;
   currentDate: string | null;
   added: string[];
   dropped: string[];
-} {
-  const dates = db
+}> {
+  const dates = await db
     .selectDistinct({ date: constituents.date })
     .from(constituents)
     .where(eq(constituents.indexCode, indexCode))
@@ -796,8 +796,8 @@ export function detectRecomposition(indexCode = TRACKED_INDEX): {
   }
 
   const [current, previous] = dates;
-  const currentSet = new Set(membersOn(indexCode, current.date));
-  const previousSet = new Set(membersOn(indexCode, previous.date));
+  const currentSet = new Set(await membersOn(indexCode, current.date));
+  const previousSet = new Set(await membersOn(indexCode, previous.date));
 
   return {
     previousDate: previous.date,
@@ -807,33 +807,31 @@ export function detectRecomposition(indexCode = TRACKED_INDEX): {
   };
 }
 
-export function membersOn(indexCode: string, date: string): string[] {
-  return db
+export async function membersOn(indexCode: string, date: string): Promise<string[]> {
+  const rows = await db
     .select({ symbol: constituents.symbol })
     .from(constituents)
     .where(
       and(eq(constituents.indexCode, indexCode), eq(constituents.date, date)),
     )
-    .all()
-    .map((r) => r.symbol);
+    .all();
+  return rows.map((r) => r.symbol);
 }
 
-/** Every date on which we captured a membership snapshot, newest first. */
-export function snapshotDates(indexCode = TRACKED_INDEX, limit = 400): string[] {
-  return db
+export async function snapshotDates(indexCode = TRACKED_INDEX, limit = 400): Promise<string[]> {
+  const rows = await db
     .selectDistinct({ date: constituents.date })
     .from(constituents)
     .where(eq(constituents.indexCode, indexCode))
     .orderBy(desc(constituents.date))
     .limit(limit)
-    .all()
-    .map((r) => r.date);
+    .all();
+  return rows.map((r) => r.date);
 }
 
-/** Trim quote history older than `keepDays` to keep the local DB small. */
-export function pruneOldQuotes(keepDays: number) {
+export async function pruneOldQuotes(keepDays: number) {
   const cutoff = new Date(Date.now() - keepDays * 86_400_000)
     .toISOString()
     .slice(0, 10);
-  db.delete(quotesDaily).where(lt(quotesDaily.date, cutoff)).run();
+  await db.delete(quotesDaily).where(lt(quotesDaily.date, cutoff)).run();
 }

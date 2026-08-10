@@ -26,8 +26,8 @@ import { prettyDate, money } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-export default function AlertsPage() {
-  if (isDatabaseEmpty()) {
+export default async function AlertsPage() {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> before creating alerts.
@@ -35,9 +35,9 @@ export default function AlertsPage() {
     );
   }
 
-  const alerts = listAlerts();
-  const events = listAlertEvents(60);
-  const constituents = getConstituents();
+  const alerts = await listAlerts();
+  const events = await listAlertEvents(60);
+  const constituents = await getConstituents();
   const unacknowledged = events.filter((e) => !e.acknowledged);
 
   return (

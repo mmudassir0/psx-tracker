@@ -5,7 +5,7 @@ import { isDatabaseEmpty } from "@/lib/market";
 
 const DB_PATH = process.env.DB_PATH ?? path.join(process.cwd(), "data", "kmi30.db");
 
-function main() {
+async function main() {
   console.log("=== Railway Startup Sequence ===");
   
   // 1. Ensure directory exists
@@ -24,7 +24,7 @@ function main() {
   }
 
   // 3. Populate initial data if database is empty
-  if (isDatabaseEmpty()) {
+  if (await isDatabaseEmpty()) {
     console.log("Database is empty. Running initial quick ingest...");
     try {
       execSync("npx tsx src/scripts/ingest.ts", { stdio: "inherit" });

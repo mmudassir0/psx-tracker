@@ -13,8 +13,8 @@ import { prettyDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-export default function ScreensPage() {
-  if (isDatabaseEmpty()) {
+export default async function ScreensPage() {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> to populate the database.
@@ -22,8 +22,8 @@ export default function ScreensPage() {
     );
   }
 
-  const results = runAllScreens();
-  const quoteDate = latestQuoteDate();
+  const results = await runAllScreens();
+  const quoteDate = await latestQuoteDate();
 
   const totalNew = results.reduce((sum, r) => sum + r.newSymbols.length, 0);
   const withMatches = results.filter((r) => r.matches.length > 0).length;

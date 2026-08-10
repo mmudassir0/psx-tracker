@@ -6,8 +6,8 @@ import { pct, prettyDate, toneClass } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-export default function IndicesPage() {
-  if (isDatabaseEmpty()) {
+export default async function IndicesPage() {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> to populate the database.
@@ -15,7 +15,8 @@ export default function IndicesPage() {
     );
   }
 
-  const summaries = getIndexSummaries();
+  const summaries = await getIndexSummaries();
+  const quoteDate = await latestQuoteDate();
   const order = sortIndexCodes(summaries.map((s) => s.code));
   const rows = order
     .map((code) => summaries.find((s) => s.code === code)!)
@@ -28,7 +29,7 @@ export default function IndicesPage() {
         description={
           <>
             Every index PSX quotes, with the constituents we last captured.
-            Session {prettyDate(latestQuoteDate())}.
+            Session {prettyDate(quoteDate)}.
           </>
         }
       />

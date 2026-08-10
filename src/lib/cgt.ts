@@ -2,20 +2,6 @@ import { asc } from "drizzle-orm";
 import { db } from "@/db";
 import { transactions } from "@/db/schema";
 
-/**
- * Realised gains by tax year, for handing to whoever files your return.
- *
- * Two things stated plainly rather than assumed:
- *
- *  - Pakistan's tax year runs 1 July to 30 June, so a disposal on 2 July
- *    falls in the following year. That is the only date rule applied here.
- *  - The portfolio pages use weighted-average cost. Tax rules may require
- *    FIFO, which gives a different answer for the same trades, so BOTH are
- *    computed side by side. Nothing here picks one for you, and none of it
- *    is tax advice — CGT rates depend on holding period and filer status,
- *    which this does not model.
- */
-
 export type CostMethod = "fifo" | "average";
 
 export interface Disposal {
@@ -23,11 +9,9 @@ export interface Disposal {
   date: string;
   taxYear: string;
   quantity: number;
-  /** Net of selling fees. */
   proceeds: number;
   costBasis: number;
   gain: number;
-  /** Days from acquisition to disposal; null under weighted average. */
   holdingDays: number | null;
 }
 
@@ -42,7 +26,6 @@ export interface TaxYearSummary {
   dividendIncome: number;
 }
 
-/** Pakistan's tax year: 1 July to 30 June, labelled by the ending year. */
 export function taxYearFor(date: string): string {
   const [y, m] = date.split("-").map(Number);
   const endYear = m >= 7 ? y + 1 : y;
@@ -52,19 +35,11 @@ export function taxYearFor(date: string): string {
 interface Lot {
   date: string;
   quantity: number;
-  /** Cost per share including buy-side fees. */
   unitCost: number;
 }
 
-/**
- * Walk the ledger and produce disposals under the chosen cost method.
- *
- * Bonus shares enter at zero cost, which dilutes the average and, under FIFO,
- * forms their own zero-cost lot — matching how the portfolio engine treats
- * them so the two views stay reconcilable.
- */
-export function computeDisposals(method: CostMethod): Disposal[] {
-  const ledger = db
+export async function computeDisposals(method: CostMethod): Promise<Disposal[]> {
+  const ledger = await db
     .select()
     .from(transactions)
     .orderBy(asc(transactions.date), asc(transactions.createdAt))
@@ -91,83 +66,82 @@ export function computeDisposals(method: CostMethod): Disposal[] {
         newQty > 0 ? (agg.quantity * agg.unitCost + cost) / newQty : 0;
       agg.quantity = newQty;
       average.set(symbol, agg);
-      continue;
-    }
+    } else if (tx.type === "sell") {
+      const proceeds = tx.quantity * tx.price - tx.fees;
 
-    if (tx.type !== "sell") continue;
+      if (method === "average") {
+        const agg = average.get(symbol) ?? { quantity: 0, unitCost: 0 };
+        const sellQty = Math.min(tx.quantity, agg.quantity);
+        const costBasis = sellQty * agg.unitCost;
+        agg.quantity = Math.max(0, agg.quantity - sellQty);
+        if (agg.quantity === 0) agg.unitCost = 0;
+        average.set(symbol, agg);
 
-    const proceeds = tx.quantity * tx.price - tx.fees;
+        disposals.push({
+          symbol,
+          date: tx.date,
+          taxYear: taxYearFor(tx.date),
+          quantity: sellQty,
+          proceeds,
+          costBasis,
+          gain: proceeds - costBasis,
+          holdingDays: null,
+        });
+      } else {
+        let remaining = tx.quantity;
+        let totalCost = 0;
+        let weightedDaysNumerator = 0;
+        const list = lots.get(symbol) ?? [];
 
-    if (method === "average") {
-      const agg = average.get(symbol);
-      if (!agg || agg.quantity <= 0) continue;
-      const sold = Math.min(tx.quantity, agg.quantity);
-      const costBasis = sold * agg.unitCost;
-      // Proceeds are pro-rated when the sale exceeds the held quantity.
-      const realisedProceeds = proceeds * (sold / tx.quantity);
+        while (remaining > 0 && list.length > 0) {
+          const lot = list[0];
+          const take = Math.min(remaining, lot.quantity);
+          totalCost += take * lot.unitCost;
+          weightedDaysNumerator += take * daysBetween(lot.date, tx.date);
 
-      disposals.push({
-        symbol,
-        date: tx.date,
-        taxYear: taxYearFor(tx.date),
-        quantity: sold,
-        proceeds: realisedProceeds,
-        costBasis,
-        gain: realisedProceeds - costBasis,
-        holdingDays: null,
-      });
+          lot.quantity -= take;
+          remaining -= take;
 
-      agg.quantity -= sold;
-      if (agg.quantity <= 0) {
-        agg.quantity = 0;
-        agg.unitCost = 0;
+          if (lot.quantity === 0) list.shift();
+        }
+
+        const matchedQty = tx.quantity - remaining;
+
+        disposals.push({
+          symbol,
+          date: tx.date,
+          taxYear: taxYearFor(tx.date),
+          quantity: matchedQty,
+          proceeds,
+          costBasis: totalCost,
+          gain: proceeds - totalCost,
+          holdingDays:
+            matchedQty > 0
+              ? Math.round(weightedDaysNumerator / matchedQty)
+              : null,
+        });
+
+        lots.set(symbol, list);
       }
-      average.set(symbol, agg);
-      continue;
     }
-
-    // FIFO: consume the oldest lots first, one disposal row per lot touched.
-    let remaining = tx.quantity;
-    const list = lots.get(symbol) ?? [];
-    while (remaining > 0 && list.length > 0) {
-      const lot = list[0];
-      const take = Math.min(remaining, lot.quantity);
-      const share = take / tx.quantity;
-
-      disposals.push({
-        symbol,
-        date: tx.date,
-        taxYear: taxYearFor(tx.date),
-        quantity: take,
-        proceeds: proceeds * share,
-        costBasis: take * lot.unitCost,
-        gain: proceeds * share - take * lot.unitCost,
-        holdingDays: daysBetween(lot.date, tx.date),
-      });
-
-      lot.quantity -= take;
-      remaining -= take;
-      if (lot.quantity <= 0) list.shift();
-    }
-    lots.set(symbol, list);
   }
 
   return disposals;
 }
 
-function daysBetween(from: string, to: string): number {
-  const ms = Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`);
+function daysBetween(a: string, b: string): number {
+  const ms = Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`);
   return Math.max(0, Math.round(ms / 86_400_000));
 }
 
-export function summariseByTaxYear(method: CostMethod): TaxYearSummary[] {
-  const disposals = computeDisposals(method);
+export async function summariseByTaxYear(method: CostMethod): Promise<TaxYearSummary[]> {
+  const disposals = await computeDisposals(method);
 
-  const dividends = db
+  const txs = await db
     .select()
     .from(transactions)
-    .all()
-    .filter((t) => t.type === "dividend");
+    .all();
+  const dividends = txs.filter((t) => t.type === "dividend");
 
   const years = new Set<string>([
     ...disposals.map((d) => d.taxYear),
@@ -199,7 +173,6 @@ export function summariseByTaxYear(method: CostMethod): TaxYearSummary[] {
     });
 }
 
-/** CSV for the accountant. */
 export function disposalsToCsv(disposals: Disposal[]): string {
   const header = [
     "Tax year",

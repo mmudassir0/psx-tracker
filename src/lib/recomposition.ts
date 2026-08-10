@@ -10,33 +10,24 @@ export interface RecompositionEvent {
   dropped: string[];
 }
 
-/**
- * Walk every consecutive pair of membership snapshots and report the ones that
- * actually changed.
- *
- * KMI30 is rebalanced periodically; a symbol leaving means it stopped meeting
- * the index's Shariah screen or was displaced on review. Because we only learn
- * about changes by diffing snapshots, history starts on the day of the first
- * ingest — there is no way to reconstruct changes from before that.
- */
-export function getRecompositionHistory(
+export async function getRecompositionHistory(
   indexCode = TRACKED_INDEX,
-): RecompositionEvent[] {
-  const dates = db
+): Promise<RecompositionEvent[]> {
+  const datesRows = await db
     .selectDistinct({ date: constituents.date })
     .from(constituents)
     .where(eq(constituents.indexCode, indexCode))
     .orderBy(desc(constituents.date))
-    .all()
-    .map((r) => r.date);
+    .all();
+  const dates = datesRows.map((r) => r.date);
 
   const events: RecompositionEvent[] = [];
 
   for (let i = 0; i < dates.length - 1; i++) {
     const current = dates[i];
     const previous = dates[i + 1];
-    const currentSet = new Set(membersOn(indexCode, current));
-    const previousSet = new Set(membersOn(indexCode, previous));
+    const currentSet = new Set(await membersOn(indexCode, current));
+    const previousSet = new Set(await membersOn(indexCode, previous));
 
     const added = [...currentSet].filter((s) => !previousSet.has(s)).sort();
     const dropped = [...previousSet].filter((s) => !currentSet.has(s)).sort();
@@ -53,28 +44,27 @@ export interface MembershipRun {
   symbol: string;
   firstSeen: string;
   lastSeen: string;
-  /** Number of snapshots the symbol appeared in. */
   snapshots: number;
   current: boolean;
 }
 
-/** Per-symbol membership span across all captured snapshots. */
-export function getMembershipRuns(
+export async function getMembershipRuns(
   indexCode = TRACKED_INDEX,
-): MembershipRun[] {
-  const rows = db
+): Promise<MembershipRun[]> {
+  const rows = await db
     .select({ date: constituents.date, symbol: constituents.symbol })
     .from(constituents)
     .where(eq(constituents.indexCode, indexCode))
     .all();
 
-  const latest = db
+  const latestRow = await db
     .selectDistinct({ date: constituents.date })
     .from(constituents)
     .where(eq(constituents.indexCode, indexCode))
     .orderBy(desc(constituents.date))
     .limit(1)
-    .get()?.date;
+    .get();
+  const latest = latestRow?.date;
 
   const bySymbol = new Map<string, MembershipRun>();
   for (const row of rows) {
@@ -106,19 +96,18 @@ export function getMembershipRuns(
   });
 }
 
-/** Total distinct snapshots captured, for the "coverage" note in the UI. */
-export function getSnapshotCoverage(indexCode = TRACKED_INDEX): {
+export async function getSnapshotCoverage(indexCode = TRACKED_INDEX): Promise<{
   count: number;
   first: string | null;
   last: string | null;
-} {
-  const dates = db
+}> {
+  const datesRows = await db
     .selectDistinct({ date: constituents.date })
     .from(constituents)
     .where(eq(constituents.indexCode, indexCode))
     .orderBy(constituents.date)
-    .all()
-    .map((r) => r.date);
+    .all();
+  const dates = datesRows.map((r) => r.date);
 
   return {
     count: dates.length,

@@ -39,29 +39,20 @@ export interface ConstituentView {
   week52Low: number | null;
   ytdChangePct: number | null;
   year1ChangePct: number | null;
-  /** Free-float market cap in PKR — the basis for index weighting. */
   freeFloatCap: number | null;
-  /** Share of KMI30 free-float cap, 0-100. */
   indexWeightPct: number | null;
-  /** How far below the 52-week high, as a positive percentage. */
   drawdownFrom52wPct: number | null;
-  /** Trailing 12-month cash dividend per share, PKR. */
   dividendPerShare: number | null;
-  /** Trailing 12-month dividend yield, percent of price. */
   dividendYieldPct: number | null;
-  /** Latest reported EPS growth, percent. */
   epsGrowthPct: number | null;
-  /** Latest reported net profit margin, percent. */
   netMarginPct: number | null;
-  /** Revenue growth between the two most recent fiscal years, percent. */
   revenueGrowthPct: number | null;
-  /** Member of a Shariah-screened index. Derived from membership, not asserted. */
   shariah: boolean;
 }
 
 /** Most recent date for which we have any quote data. */
-export function latestQuoteDate(): string | null {
-  const row = db
+export async function latestQuoteDate(): Promise<string | null> {
+  const row = await db
     .select({ date: quotesDaily.date })
     .from(quotesDaily)
     .orderBy(desc(quotesDaily.date))
@@ -71,10 +62,10 @@ export function latestQuoteDate(): string | null {
 }
 
 /** Most recent date on which we captured a membership snapshot for an index. */
-export function latestConstituentDate(
+export async function latestConstituentDate(
   indexCode: string = TRACKED_INDEX,
-): string | null {
-  const row = db
+): Promise<string | null> {
+  const row = await db
     .select({ date: constituents.date })
     .from(constituents)
     .where(eq(constituents.indexCode, indexCode))
@@ -85,15 +76,14 @@ export function latestConstituentDate(
 }
 
 /** Every index we hold a membership snapshot for. */
-export function getTrackedIndexCodes(): string[] {
-  return db
+export async function getTrackedIndexCodes(): Promise<string[]> {
+  const rows = await db
     .selectDistinct({ indexCode: constituents.indexCode })
     .from(constituents)
-    .all()
-    .map((r) => r.indexCode);
+    .all();
+  return rows.map((r) => r.indexCode);
 }
 
-/** Build the market view for one symbol, independent of any index. */
 interface ViewMaps {
   dividends?: Map<string, number>;
   epsGrowth?: Map<string, number>;
@@ -101,15 +91,15 @@ interface ViewMaps {
   revenueGrowth?: Map<string, number>;
 }
 
-export function buildView(
+export async function buildView(
   symbol: string,
   quoteDate: string | null,
   maps: ViewMaps = {},
-): ConstituentView {
-  const meta = db.select().from(symbols).where(eq(symbols.symbol, symbol)).get();
+): Promise<ConstituentView> {
+  const meta = await db.select().from(symbols).where(eq(symbols.symbol, symbol)).get();
 
   const quote = quoteDate
-    ? db
+    ? await db
         .select()
         .from(quotesDaily)
         .where(
@@ -118,7 +108,7 @@ export function buildView(
         .get()
     : undefined;
 
-  const stats = db
+  const stats = await db
     .select()
     .from(companyStats)
     .where(eq(companyStats.symbol, symbol))
@@ -143,18 +133,16 @@ export function buildView(
       ? ((stats.week52High - close) / stats.week52High) * 100
       : null;
 
-  // Callers doing many symbols pass prebuilt maps; a lone lookup builds them.
-  const dps = (maps.dividends ?? getTrailingDividendMap()).get(symbol) ?? null;
+  const dps = (maps.dividends ?? (await getTrailingDividendMap())).get(symbol) ?? null;
   const epsGrowth =
-    (maps.epsGrowth ?? getLatestMetricMap(METRIC_EPS_GROWTH)).get(symbol) ??
+    (maps.epsGrowth ?? (await getLatestMetricMap(METRIC_EPS_GROWTH))).get(symbol) ??
     null;
   const netMargin =
-    (maps.netMargin ?? getLatestMetricMap(METRIC_NET_MARGIN)).get(symbol) ??
+    (maps.netMargin ?? (await getLatestMetricMap(METRIC_NET_MARGIN))).get(symbol) ??
     null;
   const revenueGrowth =
-    (maps.revenueGrowth ?? getRevenueGrowthMap()).get(symbol) ?? null;
+    (maps.revenueGrowth ?? (await getRevenueGrowthMap())).get(symbol) ?? null;
 
-  // Shariah status is derived from index membership, never asserted.
   const memberOf = (meta?.indexes ?? "").split(",").map((x) => x.trim());
   const shariah = memberOf.some((code) => SHARIAH_INDEX_CODES.includes(code));
 
@@ -191,23 +179,15 @@ export function buildView(
   };
 }
 
-/**
- * Constituents of an index, with weights.
- *
- * Weights are free-float market cap as a share of the index total — how PSX
- * constructs its free-float indices. PSX applies a per-scrip cap that we do
- * not model, so the largest names read slightly high. Weights always sum
- * to 100 across the returned set.
- */
-export function getConstituents(
+export async function getConstituents(
   indexCode: string = TRACKED_INDEX,
-): ConstituentView[] {
-  const memberDate = latestConstituentDate(indexCode);
+): Promise<ConstituentView[]> {
+  const memberDate = await latestConstituentDate(indexCode);
   if (!memberDate) return [];
 
-  const quoteDate = latestQuoteDate();
+  const quoteDate = await latestQuoteDate();
 
-  const members = db
+  const memberRows = await db
     .select({ symbol: constituents.symbol })
     .from(constituents)
     .where(
@@ -216,18 +196,18 @@ export function getConstituents(
         eq(constituents.date, memberDate),
       ),
     )
-    .all()
-    .map((r) => r.symbol);
+    .all();
+  const members = memberRows.map((r) => r.symbol);
 
   if (members.length === 0) return [];
 
   const maps: ViewMaps = {
-    dividends: getTrailingDividendMap(),
-    epsGrowth: getLatestMetricMap(METRIC_EPS_GROWTH, members),
-    netMargin: getLatestMetricMap(METRIC_NET_MARGIN, members),
-    revenueGrowth: getRevenueGrowthMap(members),
+    dividends: await getTrailingDividendMap(),
+    epsGrowth: await getLatestMetricMap(METRIC_EPS_GROWTH, members),
+    netMargin: await getLatestMetricMap(METRIC_NET_MARGIN, members),
+    revenueGrowth: await getRevenueGrowthMap(members),
   };
-  const rows = members.map((symbol) => buildView(symbol, quoteDate, maps));
+  const rows = await Promise.all(members.map((symbol) => buildView(symbol, quoteDate, maps)));
 
   const totalCap = rows.reduce((sum, r) => sum + (r.freeFloatCap ?? 0), 0);
   if (totalCap > 0) {
@@ -242,27 +222,21 @@ export function getConstituents(
   );
 }
 
-/**
- * View for a single symbol. Falls back to a standalone view when the symbol
- * isn't in `indexCode`, so pages work for any listed company — not only the
- * 30 in KMI30.
- */
-export function getConstituent(
+export async function getConstituent(
   symbol: string,
   indexCode: string = TRACKED_INDEX,
-): ConstituentView | null {
-  const inIndex = getConstituents(indexCode).find((c) => c.symbol === symbol);
+): Promise<ConstituentView | null> {
+  const constituentsList = await getConstituents(indexCode);
+  const inIndex = constituentsList.find((c) => c.symbol === symbol);
   if (inIndex) return inIndex;
 
-  const meta = db.select().from(symbols).where(eq(symbols.symbol, symbol)).get();
+  const meta = await db.select().from(symbols).where(eq(symbols.symbol, symbol)).get();
   if (!meta) return null;
-  // Known symbol, just not a member — no index weight applies.
-  return buildView(symbol, latestQuoteDate());
+  return buildView(symbol, await latestQuoteDate());
 }
 
-/** Index codes a symbol currently belongs to, newest snapshot per index. */
-export function getIndexesForSymbol(symbol: string): string[] {
-  const meta = db.select().from(symbols).where(eq(symbols.symbol, symbol)).get();
+export async function getIndexesForSymbol(symbol: string): Promise<string[]> {
+  const meta = await db.select().from(symbols).where(eq(symbols.symbol, symbol)).get();
   if (!meta?.indexes) return [];
   return meta.indexes.split(",").map((s) => s.trim()).filter(Boolean);
 }
@@ -273,13 +247,12 @@ export interface PricePoint {
   volume: number | null;
 }
 
-/** Daily closes for a symbol, oldest first. */
-export function getPriceHistory(symbol: string, fromDate?: string): PricePoint[] {
+export async function getPriceHistory(symbol: string, fromDate?: string): Promise<PricePoint[]> {
   const where = fromDate
     ? and(eq(quotesDaily.symbol, symbol), gte(quotesDaily.date, fromDate))
     : eq(quotesDaily.symbol, symbol);
 
-  return db
+  return await db
     .select({
       date: quotesDaily.date,
       close: quotesDaily.close,
@@ -291,16 +264,15 @@ export function getPriceHistory(symbol: string, fromDate?: string): PricePoint[]
     .all();
 }
 
-/** KMI30 index level history, oldest first. */
-export function getIndexHistory(
+export async function getIndexHistory(
   indexCode = TRACKED_INDEX,
   fromDate?: string,
-): { date: string; current: number }[] {
+): Promise<{ date: string; current: number }[]> {
   const where = fromDate
     ? and(eq(indexLevels.indexCode, indexCode), gte(indexLevels.date, fromDate))
     : eq(indexLevels.indexCode, indexCode);
 
-  return db
+  return await db
     .select({ date: indexLevels.date, current: indexLevels.current })
     .from(indexLevels)
     .where(where)
@@ -308,21 +280,20 @@ export function getIndexHistory(
     .all();
 }
 
-export function getLatestIndexLevel(indexCode = TRACKED_INDEX) {
+export async function getLatestIndexLevel(indexCode = TRACKED_INDEX) {
   return (
-    db
+    (await db
       .select()
       .from(indexLevels)
       .where(eq(indexLevels.indexCode, indexCode))
       .orderBy(desc(indexLevels.date))
       .limit(1)
-      .get() ?? null
+      .get()) ?? null
   );
 }
 
-/** Year-to-date return for a symbol, computed from stored closes. */
-export function getYtdReturn(symbol: string, asOf: string): number | null {
-  const history = getPriceHistory(symbol, startOfYear(asOf));
+export async function getYtdReturn(symbol: string, asOf: string): Promise<number | null> {
+  const history = await getPriceHistory(symbol, startOfYear(asOf));
   if (history.length < 2) return null;
   const first = history[0].close;
   const last = history[history.length - 1].close;
@@ -330,7 +301,6 @@ export function getYtdReturn(symbol: string, asOf: string): number | null {
   return ((last - first) / first) * 100;
 }
 
-/** Sector rollup for the dashboard breakdown. */
 export function getSectorBreakdown(rows: ConstituentView[]) {
   const bySector = new Map<
     string,
@@ -347,8 +317,6 @@ export function getSectorBreakdown(rows: ConstituentView[]) {
     };
     existing.weightPct += row.indexWeightPct ?? 0;
     existing.count += 1;
-    // Weight each name's move by its index weight so the sector move is
-    // comparable to the index move rather than a naive average.
     existing.changePct += (row.changePct ?? 0) * (row.indexWeightPct ?? 0);
     bySector.set(sector, existing);
   }
@@ -369,66 +337,63 @@ export interface IndexSummary {
   snapshotDate: string | null;
 }
 
-/**
- * One row per index for the index browser: latest level plus how many
- * constituents we last snapshotted.
- */
-export function getIndexSummaries(): IndexSummary[] {
+export async function getIndexSummaries(): Promise<IndexSummary[]> {
+  const trackedCodes = await getTrackedIndexCodes();
+  const levelRows = await db
+    .selectDistinct({ indexCode: indexLevels.indexCode })
+    .from(indexLevels)
+    .all();
   const codes = new Set<string>([
-    ...getTrackedIndexCodes(),
-    ...db
-      .selectDistinct({ indexCode: indexLevels.indexCode })
-      .from(indexLevels)
-      .all()
-      .map((r) => r.indexCode),
+    ...trackedCodes,
+    ...levelRows.map((r) => r.indexCode),
   ]);
 
-  return [...codes].map((code) => {
-    const level = getLatestIndexLevel(code);
-    const snapshotDate = latestConstituentDate(code);
-    const memberCount = snapshotDate
-      ? db
-          .select({ symbol: constituents.symbol })
-          .from(constituents)
-          .where(
-            and(
-              eq(constituents.indexCode, code),
-              eq(constituents.date, snapshotDate),
-            ),
-          )
-          .all().length
-      : 0;
+  return Promise.all(
+    [...codes].map(async (code) => {
+      const level = await getLatestIndexLevel(code);
+      const snapshotDate = await latestConstituentDate(code);
+      const memberRows = snapshotDate
+        ? await db
+            .select({ symbol: constituents.symbol })
+            .from(constituents)
+            .where(
+              and(
+                eq(constituents.indexCode, code),
+                eq(constituents.date, snapshotDate),
+              ),
+            )
+            .all()
+        : [];
 
-    return {
-      code,
-      level: level?.current ?? null,
-      changePct: level?.changePct ?? null,
-      memberCount,
-      snapshotDate,
-    };
-  });
+      return {
+        code,
+        level: level?.current ?? null,
+        changePct: level?.changePct ?? null,
+        memberCount: memberRows.length,
+        snapshotDate,
+      };
+    }),
+  );
 }
 
-/** Most recent ingest run, for the data-freshness indicator. */
-export function getLastIngest() {
+export async function getLastIngest() {
   return (
-    db
+    (await db
       .select()
       .from(ingestRuns)
       .orderBy(desc(ingestRuns.startedAt))
       .limit(1)
-      .get() ?? null
+      .get()) ?? null
   );
 }
 
-export function getSymbolMeta(symbol: string) {
-  return db.select().from(symbols).where(eq(symbols.symbol, symbol)).get() ?? null;
+export async function getSymbolMeta(symbol: string) {
+  return (await db.select().from(symbols).where(eq(symbols.symbol, symbol)).get()) ?? null;
 }
 
-/** True when the local database has never been populated. */
-export function isDatabaseEmpty(): boolean {
+export async function isDatabaseEmpty(): Promise<boolean> {
   try {
-    const row = db
+    const row = await db
       .select({ count: sql<number>`count(*)` })
       .from(symbols)
       .get();
@@ -438,35 +403,27 @@ export function isDatabaseEmpty(): boolean {
   }
 }
 
-/**
- * Every symbol we hold a quote for, as a full view.
- *
- * The index pages only ever look at constituents, but the database carries
- * the whole market (~490 names). Screens, movers and breadth all need that
- * wider universe, so the maps are built once and shared rather than being
- * rebuilt per symbol — the difference is roughly 500 queries versus 4.
- */
-export function getAllSymbolViews(): ConstituentView[] {
-  const quoteDate = latestQuoteDate();
+export async function getAllSymbolViews(): Promise<ConstituentView[]> {
+  const quoteDate = await latestQuoteDate();
   if (!quoteDate) return [];
 
-  const universe = db
+  const universeRows = await db
     .selectDistinct({ symbol: quotesDaily.symbol })
     .from(quotesDaily)
     .where(eq(quotesDaily.date, quoteDate))
-    .all()
-    .map((r) => r.symbol);
+    .all();
+  const universe = universeRows.map((r) => r.symbol);
 
   if (universe.length === 0) return [];
 
   const maps: ViewMaps = {
-    dividends: getTrailingDividendMap(),
-    epsGrowth: getLatestMetricMap(METRIC_EPS_GROWTH, universe),
-    netMargin: getLatestMetricMap(METRIC_NET_MARGIN, universe),
-    revenueGrowth: getRevenueGrowthMap(universe),
+    dividends: await getTrailingDividendMap(),
+    epsGrowth: await getLatestMetricMap(METRIC_EPS_GROWTH, universe),
+    netMargin: await getLatestMetricMap(METRIC_NET_MARGIN, universe),
+    revenueGrowth: await getRevenueGrowthMap(universe),
   };
 
-  return universe.map((symbol) => buildView(symbol, quoteDate, maps));
+  return Promise.all(universe.map((symbol) => buildView(symbol, quoteDate, maps)));
 }
 
 export interface MarketBreadth {
@@ -474,24 +431,21 @@ export interface MarketBreadth {
   declining: number;
   unchanged: number;
   total: number;
-  /** Advancing as a share of names that actually moved, 0-100. */
   advanceRatioPct: number | null;
-  /** Names that closed at a 10% circuit limit, either way. */
   limitUp: number;
   limitDown: number;
   date: string | null;
 }
 
-/** Market-wide breadth — a better read on the day than 30 constituents. */
-export function getMarketBreadth(
-  rows: ConstituentView[] = getAllSymbolViews(),
-): MarketBreadth {
+export async function getMarketBreadth(
+  rowsInput?: ConstituentView[],
+): Promise<MarketBreadth> {
+  const rows = rowsInput ?? (await getAllSymbolViews());
   const moved = rows.filter((r) => r.changePct != null);
   const advancing = moved.filter((r) => (r.changePct ?? 0) > 0).length;
   const declining = moved.filter((r) => (r.changePct ?? 0) < 0).length;
   const unchanged = moved.length - advancing - declining;
 
-  // PSX applies a 10% daily circuit breaker; a small tolerance absorbs rounding.
   const limitUp = moved.filter((r) => (r.changePct ?? 0) >= 9.95).length;
   const limitDown = moved.filter((r) => (r.changePct ?? 0) <= -9.95).length;
 
@@ -505,7 +459,7 @@ export function getMarketBreadth(
     advanceRatioPct: directional > 0 ? (advancing / directional) * 100 : null,
     limitUp,
     limitDown,
-    date: latestQuoteDate(),
+    date: await latestQuoteDate(),
   };
 }
 
@@ -515,16 +469,11 @@ export interface Movers {
   mostActive: ConstituentView[];
 }
 
-/**
- * Gainers, losers and most active by traded value.
- *
- * Ranking "most active" by traded value rather than share count matters:
- * volume alone puts every sub-PKR-10 penny stock at the top.
- */
-export function getMovers(
-  rows: ConstituentView[] = getAllSymbolViews(),
+export async function getMovers(
+  rowsInput?: ConstituentView[],
   limit = 15,
-): Movers {
+): Promise<Movers> {
+  const rows = rowsInput ?? (await getAllSymbolViews());
   const withChange = rows.filter((r) => r.changePct != null);
 
   const byValue = rows

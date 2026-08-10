@@ -17,8 +17,8 @@ import { money, pct, count, prettyDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-export default function ZakatPage() {
-  if (isDatabaseEmpty()) {
+export default async function ZakatPage() {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No market data yet">
         Run <code>npm run setup</code> so holdings can be valued.
@@ -27,8 +27,8 @@ export default function ZakatPage() {
   }
 
   const settings = getZakatSettings();
-  const result = computeZakat(settings);
-  const quoteDate = latestQuoteDate();
+  const result = await computeZakat(settings);
+  const quoteDate = await latestQuoteDate();
 
   return (
     <div className="flex flex-col gap-5">

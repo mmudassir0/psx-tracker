@@ -12,7 +12,7 @@ export default async function SectorsPage({
 }: {
   searchParams: Promise<{ index?: string }>;
 }) {
-  if (isDatabaseEmpty()) {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> to populate the database.
@@ -21,13 +21,14 @@ export default async function SectorsPage({
   }
 
   const sp = await searchParams;
-  const available = sortIndexCodes(getTrackedIndexCodes());
+  const trackedCodes = await getTrackedIndexCodes();
+  const available = sortIndexCodes(trackedCodes);
   const indexCode =
     sp.index && available.includes(sp.index.toUpperCase())
       ? sp.index.toUpperCase()
       : DEFAULT_INDEX;
 
-  const sectors = getSectorSummaries(indexCode);
+  const sectors = await getSectorSummaries(indexCode);
 
   return (
     <div className="flex flex-col gap-5">

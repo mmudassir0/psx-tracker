@@ -57,17 +57,8 @@ export interface PortfolioSummary {
   droppedHoldings: string[];
 }
 
-/**
- * Rebuild holdings from the transaction ledger using weighted-average cost.
- *
- * - buy      adds shares and cost (fees increase basis)
- * - sell     realises P&L against the running average; basis per share is unchanged
- * - bonus    adds shares at zero cost, which dilutes the average
- * - rights   adds shares at the subscription price
- * - dividend records income only and does not affect the average
- */
-export function getHoldings(): Holding[] {
-  const ledger = db
+export async function getHoldings(): Promise<Holding[]> {
+  const ledger = await db
     .select()
     .from(transactions)
     .orderBy(asc(transactions.date), asc(transactions.createdAt))
@@ -99,7 +90,6 @@ export function getHoldings(): Holding[] {
       }
       case "bonus": {
         const newQuantity = holding.quantity + tx.quantity;
-        // Same total cost spread over more shares.
         holding.avgCost =
           newQuantity > 0
             ? (holding.quantity * holding.avgCost) / newQuantity
@@ -108,18 +98,15 @@ export function getHoldings(): Holding[] {
         break;
       }
       case "sell": {
-        const soldQuantity = Math.min(tx.quantity, holding.quantity);
-        const proceeds = soldQuantity * tx.price - tx.fees;
-        holding.realizedPnl += proceeds - soldQuantity * holding.avgCost;
-        holding.quantity -= soldQuantity;
-        if (holding.quantity <= 0) {
-          holding.quantity = 0;
-          holding.avgCost = 0;
-        }
+        const sellQuantity = Math.min(tx.quantity, holding.quantity);
+        const proceed = sellQuantity * tx.price - tx.fees;
+        const costBasis = sellQuantity * holding.avgCost;
+        holding.realizedPnl += proceed - costBasis;
+        holding.quantity = Math.max(0, holding.quantity - sellQuantity);
+        if (holding.quantity === 0) holding.avgCost = 0;
         break;
       }
       case "dividend": {
-        // quantity x price = gross payout; fees carry withholding tax.
         holding.dividendIncome += tx.quantity * tx.price - tx.fees;
         break;
       }
@@ -133,9 +120,9 @@ export function getHoldings(): Holding[] {
 }
 
 /** Holdings joined with live prices, index weights and concentration analysis. */
-export function getPortfolio(): PortfolioSummary {
-  const holdings = getHoldings();
-  const constituents = getConstituents();
+export async function getPortfolio(): Promise<PortfolioSummary> {
+  const holdings = await getHoldings();
+  const constituents = await getConstituents();
   const bySymbol = new Map<string, ConstituentView>(
     constituents.map((c) => [c.symbol, c]),
   );
@@ -166,7 +153,6 @@ export function getPortfolio(): PortfolioSummary {
       portfolioWeightPct: null,
       indexWeightPct: market?.indexWeightPct ?? null,
       activeWeightPct: null,
-      // Absent from the constituent list = no longer in KMI30.
       droppedFromIndex: holding.quantity > 0 && !market,
     };
   });
@@ -182,10 +168,11 @@ export function getPortfolio(): PortfolioSummary {
       marketValue > 0 && view.marketValue != null
         ? (view.marketValue / marketValue) * 100
         : null;
+
     view.activeWeightPct =
-      view.portfolioWeightPct == null
-        ? null
-        : view.portfolioWeightPct - (view.indexWeightPct ?? 0);
+      view.portfolioWeightPct != null && view.indexWeightPct != null
+        ? view.portfolioWeightPct - view.indexWeightPct
+        : null;
   }
 
   const investedValue = openPositions.reduce(
@@ -193,97 +180,95 @@ export function getPortfolio(): PortfolioSummary {
     0,
   );
   const unrealizedPnl = marketValue - investedValue;
-  const realizedPnl = views.reduce((sum, v) => sum + v.realizedPnl, 0);
-  const dividendIncome = views.reduce((sum, v) => sum + v.dividendIncome, 0);
+  const unrealizedPct =
+    investedValue > 0 ? (unrealizedPnl / investedValue) * 100 : 0;
 
-  return {
-    holdings: views.sort(
-      (a, b) => (b.marketValue ?? 0) - (a.marketValue ?? 0),
-    ),
-    investedValue,
-    marketValue,
-    unrealizedPnl,
-    unrealizedPct: investedValue > 0 ? (unrealizedPnl / investedValue) * 100 : 0,
-    realizedPnl,
-    dividendIncome,
-    totalPnl: unrealizedPnl + realizedPnl + dividendIncome,
-    sectors: buildSectorComparison(openPositions, constituents, marketValue),
-    droppedHoldings: views
-      .filter((v) => v.droppedFromIndex)
-      .map((v) => v.symbol),
-  };
-}
+  const totalPnl = views.reduce(
+    (sum, v) =>
+      sum + (v.unrealizedPnl ?? 0) + v.realizedPnl + v.dividendIncome,
+    0,
+  );
 
-/** Portfolio sector weights next to the index's, to surface concentration. */
-function buildSectorComparison(
-  holdings: HoldingView[],
-  constituents: ConstituentView[],
-  totalMarketValue: number,
-) {
-  const indexBySector = new Map<string, number>();
-  for (const c of constituents) {
-    const sector = c.sectorName ?? c.sectorCode ?? "Unknown";
-    indexBySector.set(
-      sector,
-      (indexBySector.get(sector) ?? 0) + (c.indexWeightPct ?? 0),
-    );
+  // Sector rollup for portfolio-vs-index concentration analysis.
+  const bySector = new Map<
+    string,
+    { portfolioCap: number; indexWeightSum: number }
+  >();
+
+  for (const view of openPositions) {
+    const sector = view.sectorName ?? "Unknown";
+    const existing = bySector.get(sector) ?? {
+      portfolioCap: 0,
+      indexWeightSum: 0,
+    };
+    existing.portfolioCap += view.marketValue ?? 0;
+    bySector.set(sector, existing);
   }
 
-  const portfolioBySector = new Map<string, number>();
-  for (const h of holdings) {
-    const sector = h.sectorName ?? "Unknown";
-    portfolioBySector.set(
-      sector,
-      (portfolioBySector.get(sector) ?? 0) + (h.marketValue ?? 0),
-    );
+  // Include index sector weights so underweight sectors show up too.
+  for (const constituent of constituents) {
+    const sector = constituent.sectorName ?? "Unknown";
+    const existing = bySector.get(sector) ?? {
+      portfolioCap: 0,
+      indexWeightSum: 0,
+    };
+    existing.indexWeightSum += constituent.indexWeightPct ?? 0;
+    bySector.set(sector, existing);
   }
 
-  const sectors = new Set([
-    ...indexBySector.keys(),
-    ...portfolioBySector.keys(),
-  ]);
-
-  return [...sectors]
-    .map((sector) => {
-      const value = portfolioBySector.get(sector) ?? 0;
-      const portfolioWeightPct =
-        totalMarketValue > 0 ? (value / totalMarketValue) * 100 : 0;
-      const indexWeightPct = indexBySector.get(sector) ?? 0;
+  const sectorRollup = [...bySector.entries()]
+    .map(([sector, s]) => {
+      const portWeight =
+        marketValue > 0 ? (s.portfolioCap / marketValue) * 100 : 0;
       return {
         sector,
-        portfolioWeightPct,
-        indexWeightPct,
-        activeWeightPct: portfolioWeightPct - indexWeightPct,
-        marketValue: value,
+        portfolioWeightPct: portWeight,
+        indexWeightPct: s.indexWeightSum,
+        activeWeightPct: portWeight - s.indexWeightSum,
+        marketValue: s.portfolioCap,
       };
     })
     .filter((s) => s.portfolioWeightPct > 0 || s.indexWeightPct > 0)
     .sort((a, b) => b.portfolioWeightPct - a.portfolioWeightPct);
+
+  const droppedHoldings = openPositions
+    .filter((v) => v.droppedFromIndex)
+    .map((v) => v.symbol);
+
+  return {
+    holdings: views,
+    investedValue,
+    marketValue,
+    unrealizedPnl,
+    unrealizedPct,
+    realizedPnl: views.reduce((sum, v) => sum + v.realizedPnl, 0),
+    dividendIncome: views.reduce((sum, v) => sum + v.dividendIncome, 0),
+    totalPnl,
+    sectors: sectorRollup,
+    droppedHoldings,
+  };
 }
 
-// ---------------------------------------------------------------------------
-// Ledger mutations
-// ---------------------------------------------------------------------------
-
-export function listTransactions() {
-  return db
+export async function listTransactions() {
+  return await db
     .select()
     .from(transactions)
     .orderBy(desc(transactions.date), desc(transactions.createdAt))
     .all();
 }
 
-export function addTransaction(input: {
+export async function addTransaction(input: {
   symbol: string;
   date: string;
   type: TransactionType;
   quantity: number;
   price: number;
   fees?: number;
-  note?: string | null;
+  note?: string;
 }) {
   const id = randomUUID();
-  db.insert(transactions)
+  await db
+    .insert(transactions)
     .values({
       id,
       symbol: input.symbol.toUpperCase().trim(),
@@ -299,6 +284,6 @@ export function addTransaction(input: {
   return id;
 }
 
-export function deleteTransaction(id: string) {
-  db.delete(transactions).where(eq(transactions.id, id)).run();
+export async function deleteTransaction(id: string) {
+  await db.delete(transactions).where(eq(transactions.id, id)).run();
 }

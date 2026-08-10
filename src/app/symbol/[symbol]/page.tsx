@@ -57,14 +57,14 @@ export default async function SymbolPage({
   const { symbol: raw } = await params;
   const symbol = raw.toUpperCase();
 
-  const meta = getSymbolMeta(symbol);
+  const meta = await getSymbolMeta(symbol);
   if (!meta) notFound();
 
-  const view = getConstituent(symbol);
-  const history = getPriceHistory(symbol);
-  const quoteDate = latestQuoteDate();
+  const view = await getConstituent(symbol);
+  const history = await getPriceHistory(symbol);
+  const quoteDate = await latestQuoteDate();
 
-  const news = db
+  const news = await db
     .select()
     .from(announcements)
     .where(eq(announcements.symbol, symbol))
@@ -72,10 +72,10 @@ export default async function SymbolPage({
     .limit(25)
     .all();
 
-  const payoutRows = getPayouts(symbol, 15);
-  const companyFinancials = getCompanyFinancials(symbol);
-
-  const holding = getPortfolio().holdings.find((h) => h.symbol === symbol);
+  const payoutRows = await getPayouts(symbol, 15);
+  const companyFinancials = await getCompanyFinancials(symbol);
+  const portfolio = await getPortfolio();
+  const holding = portfolio.holdings.find((h) => h.symbol === symbol);
 
   return (
     <div className="flex flex-col gap-5">

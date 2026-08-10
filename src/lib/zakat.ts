@@ -91,8 +91,8 @@ export interface ZakatResult {
   dividendIncome: number;
 }
 
-export function computeZakat(settings: ZakatSettings): ZakatResult {
-  const portfolio = getPortfolio();
+export async function computeZakat(settings: ZakatSettings): Promise<ZakatResult> {
+  const portfolio = await getPortfolio();
   const open = portfolio.holdings.filter((h) => h.quantity > 0);
 
   const lines: ZakatLine[] = open.map((h: HoldingView) => {

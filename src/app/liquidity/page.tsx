@@ -32,7 +32,7 @@ export default async function LiquidityPage({
 }: {
   searchParams: Promise<{ index?: string; window?: string; held?: string }>;
 }) {
-  if (isDatabaseEmpty()) {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> to populate volume history.
@@ -41,7 +41,8 @@ export default async function LiquidityPage({
   }
 
   const sp = await searchParams;
-  const available = sortIndexCodes(getTrackedIndexCodes());
+  const trackedCodes = await getTrackedIndexCodes();
+  const available = sortIndexCodes(trackedCodes);
   const indexCode =
     sp.index && available.includes(sp.index.toUpperCase())
       ? sp.index.toUpperCase()
@@ -52,7 +53,7 @@ export default async function LiquidityPage({
   const days = WINDOWS.find((w) => w.key === windowKey)!.days;
   const heldOnly = sp.held === "1";
 
-  const report = buildLiquidityReport({ indexCode, days, heldOnly });
+  const report = await buildLiquidityReport({ indexCode, days, heldOnly });
 
   const link = (o: Record<string, string>) => {
     const p = new URLSearchParams({

@@ -20,7 +20,7 @@ export default async function CgtPage({
 }: {
   searchParams: Promise<{ method?: string }>;
 }) {
-  if (isDatabaseEmpty()) {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> first.
@@ -31,9 +31,10 @@ export default async function CgtPage({
   const { method: methodParam } = await searchParams;
   const method: CostMethod = methodParam === "fifo" ? "fifo" : "average";
 
-  const years = summariseByTaxYear(method);
+  const years = await summariseByTaxYear(method);
   const other: CostMethod = method === "fifo" ? "average" : "fifo";
-  const otherTotal = computeDisposals(other).reduce((s, d) => s + d.gain, 0);
+  const otherDisposals = await computeDisposals(other);
+  const otherTotal = otherDisposals.reduce((s, d) => s + d.gain, 0);
   const thisTotal = years.reduce((s, y) => s + y.netGain, 0);
 
   if (years.length === 0) {

@@ -66,11 +66,12 @@ export function clearDemo(): number {
     .changes;
 }
 
-export function hasDemoData(): boolean {
-  return listTransactions().some((t) => t.note === DEMO_NOTE);
+export async function hasDemoData(): Promise<boolean> {
+  const txs = await listTransactions();
+  return txs.some((t) => t.note === DEMO_NOTE);
 }
 
-function main() {
+async function main() {
   const mode = process.argv.includes("--clear") ? "clear" : "seed";
 
   if (mode === "clear") {
@@ -79,7 +80,8 @@ function main() {
     return;
   }
 
-  const real = listTransactions().filter((t) => t.note !== DEMO_NOTE).length;
+  const txs = await listTransactions();
+  const real = txs.filter((t) => t.note !== DEMO_NOTE).length;
   if (real > 0) {
     console.log(
       `Note: ${real} non-demo transaction(s) already exist. They are left untouched.`,

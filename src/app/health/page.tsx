@@ -41,8 +41,8 @@ export const dynamic = "force-dynamic";
  * some have only weeks of price history — and silently incomplete data is
  * worse than visibly incomplete data. This page makes the gaps explicit.
  */
-export default function HealthPage() {
-  if (isDatabaseEmpty()) {
+export default async function HealthPage() {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> to populate the database.
@@ -51,33 +51,31 @@ export default function HealthPage() {
   }
 
   const totals = {
-    symbols: db.select({ c: sql<number>`count(*)` }).from(symbols).get()?.c ?? 0,
+    symbols: (await db.select({ c: sql<number>`count(*)` }).from(symbols).get())?.c ?? 0,
     quotes:
-      db.select({ c: sql<number>`count(*)` }).from(quotesDaily).get()?.c ?? 0,
+      (await db.select({ c: sql<number>`count(*)` }).from(quotesDaily).get())?.c ?? 0,
     stats:
-      db
+      (await db
         .select({ c: sql<number>`count(distinct ${companyStats.symbol})` })
         .from(companyStats)
-        .get()?.c ?? 0,
+        .get())?.c ?? 0,
     announcements:
-      db.select({ c: sql<number>`count(*)` }).from(announcements).get()?.c ?? 0,
+      (await db.select({ c: sql<number>`count(*)` }).from(announcements).get())?.c ?? 0,
     payouts:
-      db.select({ c: sql<number>`count(*)` }).from(payouts).get()?.c ?? 0,
+      (await db.select({ c: sql<number>`count(*)` }).from(payouts).get())?.c ?? 0,
     financialCells:
-      db.select({ c: sql<number>`count(*)` }).from(financials).get()?.c ?? 0,
+      (await db.select({ c: sql<number>`count(*)` }).from(financials).get())?.c ?? 0,
     indexLevels:
-      db.select({ c: sql<number>`count(*)` }).from(indexLevels).get()?.c ?? 0,
+      (await db.select({ c: sql<number>`count(*)` }).from(indexLevels).get())?.c ?? 0,
   };
 
-  const noPage = db
+  const noPage = await db
     .select({ symbol: symbols.symbol, indexes: symbols.indexes })
     .from(symbols)
     .where(sql`${symbols.noCompanyPage} = 1`)
     .all();
 
-  // History depth per symbol, so thin coverage is visible before it misleads
-  // a backtest.
-  const depth = db
+  const depth = await db
     .select({
       symbol: quotesDaily.symbol,
       bars: sql<number>`count(*)`,
@@ -103,13 +101,13 @@ export default function HealthPage() {
     .sort((a, b) => a.bars - b.bars)
     .slice(0, 20);
 
-  const quoteDate = latestQuoteDate();
+  const quoteDate = await latestQuoteDate();
   const stale = depth
     .filter((d) => quoteDate != null && d.last < quoteDate)
     .sort((a, b) => a.last.localeCompare(b.last))
     .slice(0, 20);
 
-  const missingFundamentals = db
+  const missingFundamentals = await db
     .select({ symbol: symbols.symbol })
     .from(symbols)
     .where(
@@ -117,18 +115,21 @@ export default function HealthPage() {
     )
     .all();
 
-  const indexCodes = sortIndexCodes(getTrackedIndexCodes());
-  const snapshotCounts = indexCodes.map((code) => {
-    const row = db
-      .select({ dates: sql<number>`count(distinct ${constituents.date})` })
-      .from(constituents)
-      .where(sql`${constituents.indexCode} = ${code}`)
-      .get();
-    return { code, snapshots: row?.dates ?? 0 };
-  });
+  const trackedCodes = await getTrackedIndexCodes();
+  const indexCodes = sortIndexCodes(trackedCodes);
+  const snapshotCounts = await Promise.all(
+    indexCodes.map(async (code) => {
+      const row = await db
+        .select({ dates: sql<number>`count(distinct ${constituents.date})` })
+        .from(constituents)
+        .where(sql`${constituents.indexCode} = ${code}`)
+        .get();
+      return { code, snapshots: row?.dates ?? 0 };
+    }),
+  );
 
-  const lastIngest = getLastIngest();
-  const runs = db
+  const lastIngest = await getLastIngest();
+  const runs = await db
     .select()
     .from(ingestRuns)
     .orderBy(sql`${ingestRuns.startedAt} desc`)

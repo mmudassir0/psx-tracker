@@ -22,7 +22,7 @@ export default async function ScreenDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  if (isDatabaseEmpty()) {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> first.
@@ -31,17 +31,17 @@ export default async function ScreenDetailPage({
   }
 
   const { id } = await params;
-  const result = runScreen(id);
+  const result = await runScreen(id);
   if (!result) notFound();
 
   const { screen, matches, newSymbols, droppedSymbols, previousDate } = result;
 
+  const portfolio = await getPortfolio();
   const held = new Set(
-    getPortfolio()
-      .holdings.filter((h) => h.quantity > 0)
-      .map((h) => h.symbol),
+    portfolio.holdings.filter((h) => h.quantity > 0).map((h) => h.symbol),
   );
   const heldMatches = matches.filter((m) => held.has(m.symbol));
+  const quoteDate = await latestQuoteDate();
 
   return (
     <div className="flex flex-col gap-5">
@@ -49,7 +49,7 @@ export default async function ScreenDetailPage({
         title={screen.name}
         description={
           <>
-            {screen.description} · Session {prettyDate(latestQuoteDate())}
+            {screen.description} · Session {prettyDate(quoteDate)}
           </>
         }
         actions={

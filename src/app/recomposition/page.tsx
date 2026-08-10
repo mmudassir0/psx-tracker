@@ -30,7 +30,7 @@ export default async function RecompositionPage({
 }: {
   searchParams: Promise<{ index?: string }>;
 }) {
-  if (isDatabaseEmpty()) {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> to capture the first membership snapshot.
@@ -39,17 +39,18 @@ export default async function RecompositionPage({
   }
 
   const { index: indexParam } = await searchParams;
-  const available = sortIndexCodes(getTrackedIndexCodes());
+  const trackedCodes = await getTrackedIndexCodes();
+  const available = sortIndexCodes(trackedCodes);
   const indexCode =
     indexParam && available.includes(indexParam.toUpperCase())
       ? indexParam.toUpperCase()
       : DEFAULT_INDEX;
   const meta = getIndexMeta(indexCode);
 
-  const events = getRecompositionHistory(indexCode);
-  const runs = getMembershipRuns(indexCode);
-  const coverage = getSnapshotCoverage(indexCode);
-  const portfolio = getPortfolio();
+  const events = await getRecompositionHistory(indexCode);
+  const runs = await getMembershipRuns(indexCode);
+  const coverage = await getSnapshotCoverage(indexCode);
+  const portfolio = await getPortfolio();
   const heldSymbols = new Set(
     portfolio.holdings.filter((h) => h.quantity > 0).map((h) => h.symbol),
   );

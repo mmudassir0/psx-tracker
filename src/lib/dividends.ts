@@ -3,15 +3,6 @@ import { db } from "@/db";
 import { payouts } from "@/db/schema";
 import { addDays, todayPkt } from "@/lib/dates";
 
-/**
- * Dividend analysis built on the real declared rates from PSX's payouts
- * fragment.
- *
- * Rates are quoted as a percent of face value; PKR 10 is the PSX standard and
- * what the per-share figure assumes. A company on a different face value would
- * be misconverted, which is why the raw percent is always kept alongside.
- */
-
 export interface PayoutRecord {
   id: string;
   symbol: string;
@@ -26,8 +17,8 @@ export interface PayoutRecord {
 }
 
 /** Cash dividends declared in the last `months`, newest first. */
-export function getPayouts(symbol: string, limit = 20): PayoutRecord[] {
-  return db
+export async function getPayouts(symbol: string, limit = 20): Promise<PayoutRecord[]> {
+  return await db
     .select()
     .from(payouts)
     .where(eq(payouts.symbol, symbol))
@@ -40,12 +31,12 @@ export function getPayouts(symbol: string, limit = 20): PayoutRecord[] {
  * Trailing dividend per share over the last 12 months.
  * Cash dividends only — bonus and rights are not income.
  */
-export function getTrailingDividendPerShare(
+export async function getTrailingDividendPerShare(
   symbol: string,
   asOf: string = todayPkt(),
-): number | null {
+): Promise<number | null> {
   const since = addDays(asOf, -365);
-  const rows = db
+  const rows = await db
     .select({ perShare: payouts.perShare })
     .from(payouts)
     .where(
@@ -63,23 +54,23 @@ export function getTrailingDividendPerShare(
 }
 
 /** Trailing 12-month dividend yield as a percentage of `price`. */
-export function getDividendYield(
+export async function getDividendYield(
   symbol: string,
   price: number | null,
   asOf: string = todayPkt(),
-): number | null {
+): Promise<number | null> {
   if (price == null || price <= 0) return null;
-  const dps = getTrailingDividendPerShare(symbol, asOf);
+  const dps = await getTrailingDividendPerShare(symbol, asOf);
   if (dps == null) return null;
   return (dps / price) * 100;
 }
 
 /** Trailing dividend per share for many symbols in one query. */
-export function getTrailingDividendMap(
+export async function getTrailingDividendMap(
   asOf: string = todayPkt(),
-): Map<string, number> {
+): Promise<Map<string, number>> {
   const since = addDays(asOf, -365);
-  const rows = db
+  const rows = await db
     .select({
       symbol: payouts.symbol,
       total: sql<number>`sum(${payouts.perShare})`,
@@ -109,11 +100,11 @@ export interface UpcomingBookClosure extends PayoutRecord {
  * This is the date that actually matters for entitlement — you must be on the
  * register when the books close, not merely when the dividend is announced.
  */
-export function getUpcomingBookClosures(
+export async function getUpcomingBookClosures(
   from: string = todayPkt(),
   limit = 40,
-): UpcomingBookClosure[] {
-  const rows = db
+): Promise<UpcomingBookClosure[]> {
+  const rows = await db
     .select()
     .from(payouts)
     .where(gte(payouts.bookClosureTo, from))

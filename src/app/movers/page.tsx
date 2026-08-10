@@ -33,7 +33,7 @@ export default async function MoversPage({
 }: {
   searchParams: Promise<{ scope?: string }>;
 }) {
-  if (isDatabaseEmpty()) {
+  if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
         Run <code>npm run setup</code> to populate the database.
@@ -44,16 +44,15 @@ export default async function MoversPage({
   const { scope } = await searchParams;
   const shariahOnly = scope === "shariah";
 
-  const all = getAllSymbolViews();
+  const all = await getAllSymbolViews();
   const rows = shariahOnly ? all.filter((r) => r.shariah) : all;
 
-  const breadth = getMarketBreadth(rows);
-  const movers = getMovers(rows, 15);
+  const breadth = await getMarketBreadth(rows);
+  const movers = await getMovers(rows, 15);
 
+  const portfolio = await getPortfolio();
   const held = new Set(
-    getPortfolio()
-      .holdings.filter((h) => h.quantity > 0)
-      .map((h) => h.symbol),
+    portfolio.holdings.filter((h) => h.quantity > 0).map((h) => h.symbol),
   );
 
   return (
@@ -203,7 +202,7 @@ export default async function MoversPage({
 function BreadthBar({
   breadth,
 }: {
-  breadth: ReturnType<typeof getMarketBreadth>;
+  breadth: Awaited<ReturnType<typeof getMarketBreadth>>;
 }) {
   const total = Math.max(1, breadth.total);
   const segments = [
