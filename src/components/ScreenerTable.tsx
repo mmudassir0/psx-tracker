@@ -183,7 +183,7 @@ export function ScreenerTable({ rows }: { rows: ConstituentView[] }) {
                   <div className="flex flex-col">
                     <SymbolLink symbol={r.symbol} />
                     <span className="max-w-[180px] truncate text-xs text-slate-500 dark:text-slate-400">
-                      {r.name ?? sectorLabel(r.sectorName, r.sectorCode)}
+                      {r.name ?? (r.sectorName ?? r.symbol)}
                     </span>
                   </div>
                 </Td>

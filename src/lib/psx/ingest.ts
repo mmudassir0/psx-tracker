@@ -217,7 +217,7 @@ export async function runIngest(
     fundamentalScope = "all",
     fundamentalIndices = [TRACKED_INDEX],
     recheckCompanyPages = false,
-    concurrency = 4,
+    concurrency = 8,
     trigger = "cli",
     onProgress: onProgressOption = () => {},
   } = options;
@@ -225,7 +225,8 @@ export async function runIngest(
   const runId = randomUUID();
   const errors: string[] = [];
 
-  db.insert(ingestRuns)
+  await db
+    .insert(ingestRuns)
     .values({ id: runId, startedAt: new Date(), status: "running", trigger })
     .run();
 
@@ -234,7 +235,8 @@ export async function runIngest(
   const onProgress = (message: string) => {
     onProgressOption(message);
     try {
-      db.update(ingestRuns)
+      void db
+        .update(ingestRuns)
         .set({ progress: message.trim() })
         .where(eq(ingestRuns.id, runId))
         .run();
@@ -272,7 +274,8 @@ export async function runIngest(
     const indices = parseIndices(await psxFetch("/indices", { ttlMs: 0 }));
     for (const row of indices) {
       if (row.current == null) continue;
-      db.insert(indexLevels)
+      await db
+        .insert(indexLevels)
         .values({
           indexCode: row.indexCode,
           date,
@@ -313,8 +316,8 @@ export async function runIngest(
     }
 
     for (const row of marketRows) {
-      upsertSymbol(row);
-      if (writeMarketWatchQuote(row, date)) result.quotesWritten++;
+      await upsertSymbol(row);
+      if (await writeMarketWatchQuote(row, date)) result.quotesWritten++;
     }
 
     // Group every symbol by every index it belongs to. The membership column
@@ -363,7 +366,8 @@ export async function runIngest(
       }
 
       for (const symbol of symbolsInIndex) {
-        db.insert(constituents)
+        await db
+          .insert(constituents)
           .values({ date, indexCode: code, symbol })
           .onConflictDoNothing()
           .run();
@@ -405,7 +409,7 @@ export async function runIngest(
           const bars = parseEodSeries(
             await psxFetchJson(`/timeseries/eod/${code}`, { ttlMs: 0 }),
           );
-          writeIndexLevelBars(code, bars);
+          await writeIndexLevelBars(code, bars);
           result.indexBarsWritten += bars.length;
         } catch (err) {
           errors.push(`index eod ${code}: ${String(err)}`);
@@ -420,7 +424,7 @@ export async function runIngest(
           const bars = parseEodSeries(
             await psxFetchJson(`/timeseries/eod/${symbol}`, { ttlMs: 0 }),
           );
-          writeEodBars(symbol, bars);
+          await writeEodBars(symbol, bars);
           result.barsWritten += bars.length;
         } catch (err) {
           errors.push(`eod ${symbol}: ${String(err)}`);
@@ -440,7 +444,7 @@ export async function runIngest(
       result.pagesSkipped = fundamentalSymbols.length - toFetch.length;
 
       if (recheckCompanyPages) {
-        db.update(symbols).set({ noCompanyPage: false }).run();
+        await db.update(symbols).set({ noCompanyPage: false }).run();
       }
 
       onProgress(
@@ -462,7 +466,8 @@ export async function runIngest(
           // Financials and ratios are server-rendered in the same document,
           // so this costs no extra request.
           for (const cell of parseFinancials(companyHtml)) {
-            db.insert(financialsTable)
+            await db
+              .insert(financialsTable)
               .values({
                 symbol,
                 fiscalYear: cell.fiscalYear,
@@ -484,7 +489,8 @@ export async function runIngest(
             result.financialCellsWritten++;
           }
 
-          db.insert(companyStats)
+          await db
+            .insert(companyStats)
             .values({
               symbol,
               date,
@@ -515,7 +521,8 @@ export async function runIngest(
             .run();
 
           if (page.name) {
-            db.update(symbols)
+            await db
+              .update(symbols)
               .set({ name: page.name, sectorName: page.sectorName })
               .where(eq(symbols.symbol, symbol))
               .run();
@@ -524,7 +531,8 @@ export async function runIngest(
           for (const a of page.announcements) {
             const category = categorise(a.title);
             const id = stableId(symbol, a.date, a.title);
-            db.insert(announcementsTable)
+            await db
+              .insert(announcementsTable)
               .values({
                 id,
                 symbol,
@@ -552,7 +560,7 @@ export async function runIngest(
               }),
             );
             for (const p of payoutRows) {
-              writePayout(symbol, p);
+              await writePayout(symbol, p);
             }
             result.payoutsWritten += payoutRows.length;
           } catch (err) {
@@ -564,7 +572,8 @@ export async function runIngest(
           // A 500 here means PSX has no company page for this counter at all.
           // Record that so we stop paying for it on every future run.
           if (err instanceof PsxError && err.status === 500) {
-            db.update(symbols)
+            await db
+              .update(symbols)
               .set({ noCompanyPage: true })
               .where(eq(symbols.symbol, symbol))
               .run();
@@ -575,14 +584,15 @@ export async function runIngest(
         } finally {
           // Progress matters here: this loop can be ~380 requests.
           done++;
-          if (done % 50 === 0 || done === toFetch.length) {
+          if (done % 25 === 0 || done === toFetch.length) {
             onProgress(`  ${done}/${toFetch.length} companies`);
           }
         }
       });
     }
 
-    db.update(ingestRuns)
+    await db
+      .update(ingestRuns)
       .set({
         finishedAt: new Date(),
         status: errors.length ? "error" : "ok",
@@ -595,7 +605,8 @@ export async function runIngest(
 
     return result;
   } catch (err) {
-    db.update(ingestRuns)
+    await db
+      .update(ingestRuns)
       .set({
         finishedAt: new Date(),
         status: "error",
@@ -607,8 +618,9 @@ export async function runIngest(
   }
 }
 
-function upsertSymbol(row: MarketWatchRow) {
-  db.insert(symbols)
+async function upsertSymbol(row: MarketWatchRow) {
+  await db
+    .insert(symbols)
     .values({
       symbol: row.symbol,
       sectorCode: row.sectorCode,
@@ -629,11 +641,12 @@ function upsertSymbol(row: MarketWatchRow) {
 }
 
 /** Live quote carries full OHLC, so it always wins over an EOD row. */
-function writeMarketWatchQuote(row: MarketWatchRow, date: string): boolean {
+async function writeMarketWatchQuote(row: MarketWatchRow, date: string): Promise<boolean> {
   const close = row.current ?? row.ldcp;
   if (close == null) return false;
 
-  db.insert(quotesDaily)
+  await db
+    .insert(quotesDaily)
     .values({
       symbol: row.symbol,
       date,
@@ -669,7 +682,7 @@ function writeMarketWatchQuote(row: MarketWatchRow, date: string): boolean {
  * Never clobber high/low/change captured live from the /indices page, which
  * the timeseries does not carry.
  */
-function writeIndexLevelBars(
+async function writeIndexLevelBars(
   indexCode: string,
   bars: Array<{ date: string; close: number; open: number | null; volume: number | null }>,
 ) {
@@ -677,7 +690,8 @@ function writeIndexLevelBars(
   const CHUNK_SIZE = 200;
   for (let i = 0; i < bars.length; i += CHUNK_SIZE) {
     const chunk = bars.slice(i, i + CHUNK_SIZE);
-    db.insert(indexLevels)
+    await db
+      .insert(indexLevels)
       .values(
         chunk.map((bar) => ({
           indexCode,
@@ -703,7 +717,7 @@ function writeIndexLevelBars(
  * EOD bars have no high/low. Never overwrite a richer market-watch row's
  * intraday range — coalesce keeps whatever was already captured.
  */
-function writeEodBars(
+async function writeEodBars(
   symbol: string,
   bars: Array<{ date: string; close: number; open: number | null; volume: number | null }>,
 ) {
@@ -711,7 +725,8 @@ function writeEodBars(
   const CHUNK_SIZE = 200;
   for (let i = 0; i < bars.length; i += CHUNK_SIZE) {
     const chunk = bars.slice(i, i + CHUNK_SIZE);
-    db.insert(quotesDaily)
+    await db
+      .insert(quotesDaily)
       .values(
         chunk.map((bar) => ({
           symbol,
@@ -737,8 +752,9 @@ function writeEodBars(
 }
 
 /** Store a payout row from the PSX payouts fragment. */
-function writePayout(symbol: string, p: PayoutRow) {
-  db.insert(payoutsTable)
+async function writePayout(symbol: string, p: PayoutRow) {
+  await db
+    .insert(payoutsTable)
     .values({
       // Keyed on symbol+date+raw so a corrected rate updates in place.
       id: stableId("payout", symbol, p.date, p.raw),

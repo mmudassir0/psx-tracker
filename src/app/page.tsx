@@ -218,7 +218,7 @@ export default async function DashboardPage() {
                     <SymbolLink symbol={c.symbol} />
                   </Td>
                   <Td className="max-w-[220px] truncate text-slate-600 dark:text-slate-400">
-                    {c.name ?? sectorLabel(c.sectorName, c.sectorCode)}
+                    {c.name ?? (c.sectorName ?? c.symbol)}
                   </Td>
                   <Td align="right">{money(c.close)}</Td>
                   <Td align="right" className={toneClass(c.changePct)}>
