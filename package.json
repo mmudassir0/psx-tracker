@@ -23,6 +23,7 @@
     "seed:clear": "tsx src/scripts/seed-demo.ts --clear"
   },
   "dependencies": {
+    "@libsql/client": "^0.17.4",
     "better-sqlite3": "^13.0.2",
     "cheerio": "^1.2.0",
     "date-fns": "^4.4.0",

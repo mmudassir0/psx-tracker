@@ -1,0 +1,28 @@
+name: PSX Daily Data Ingest
+
+on:
+  schedule:
+    # 11:00 UTC = 16:00 PKT (Monday to Friday)
+    - cron: "0 11 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run PSX Ingest
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: npx tsx src/scripts/ingest.ts

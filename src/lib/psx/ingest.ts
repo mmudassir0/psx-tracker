@@ -64,37 +64,36 @@ export function isPlausibleMembership(
 }
 
 /** Symbols a previous run found to have no PSX company page. */
-function missingPageSymbols(): Set<string> {
-  return new Set(
-    db
-      .select({ symbol: symbols.symbol })
-      .from(symbols)
-      .where(eq(symbols.noCompanyPage, true))
-      .all()
-      .map((r) => r.symbol),
-  );
+async function missingPageSymbols(): Promise<Set<string>> {
+  const rows = await db
+    .select({ symbol: symbols.symbol })
+    .from(symbols)
+    .where(eq(symbols.noCompanyPage, true))
+    .all();
+  return new Set(rows.map((r) => r.symbol));
 }
 
 /** Does a membership snapshot already exist for this index on this date? */
-function hasSnapshot(indexCode: string, date: string): boolean {
-  return Boolean(
-    db
-      .select({ symbol: constituents.symbol })
-      .from(constituents)
-      .where(
-        and(
-          eq(constituents.indexCode, indexCode),
-          eq(constituents.date, date),
-        ),
-      )
-      .limit(1)
-      .get(),
-  );
+async function hasSnapshot(indexCode: string, date: string): Promise<boolean> {
+  if (!date || !indexCode) return false;
+  const row = await db
+    .select({ symbol: constituents.symbol })
+    .from(constituents)
+    .where(
+      and(
+        eq(constituents.indexCode, indexCode),
+        eq(constituents.date, date),
+      ),
+    )
+    .limit(1)
+    .get();
+  return Boolean(row);
 }
 
 /** Members in the most recent snapshot before `date`, or null if none. */
-function previousMemberCount(indexCode: string, date: string): number | null {
-  const row = db
+async function previousMemberCount(indexCode: string, date: string): Promise<number | null> {
+  if (!date || !indexCode) return null;
+  const row = await db
     .select({ date: constituents.date })
     .from(constituents)
     .where(
@@ -104,9 +103,9 @@ function previousMemberCount(indexCode: string, date: string): number | null {
     .limit(1)
     .get();
 
-  if (!row) return null;
+  if (!row?.date) return null;
 
-  return db
+  const rows = await db
     .select({ symbol: constituents.symbol })
     .from(constituents)
     .where(
@@ -115,7 +114,8 @@ function previousMemberCount(indexCode: string, date: string): number | null {
         eq(constituents.date, row.date),
       ),
     )
-    .all().length;
+    .all();
+  return rows.length;
 }
 
 /**
@@ -344,9 +344,9 @@ export async function runIngest(
     const bootstrapped: string[] = [];
 
     for (const [code, symbolsInIndex] of byIndex) {
-      const previous = previousMemberCount(code, date);
+      const previous = await previousMemberCount(code, date);
 
-      if (marketOpen && previous == null && !hasSnapshot(code, date)) {
+      if (marketOpen && previous == null && !(await hasSnapshot(code, date))) {
         bootstrapped.push(code);
       }
 
@@ -405,7 +405,7 @@ export async function runIngest(
           const bars = parseEodSeries(
             await psxFetchJson(`/timeseries/eod/${code}`, { ttlMs: 0 }),
           );
-          for (const bar of bars) writeIndexLevelBar(code, bar);
+          writeIndexLevelBars(code, bars);
           result.indexBarsWritten += bars.length;
         } catch (err) {
           errors.push(`index eod ${code}: ${String(err)}`);
@@ -420,9 +420,7 @@ export async function runIngest(
           const bars = parseEodSeries(
             await psxFetchJson(`/timeseries/eod/${symbol}`, { ttlMs: 0 }),
           );
-          for (const bar of bars) {
-            writeEodBar(symbol, bar);
-          }
+          writeEodBars(symbol, bars);
           result.barsWritten += bars.length;
         } catch (err) {
           errors.push(`eod ${symbol}: ${String(err)}`);
@@ -437,7 +435,7 @@ export async function runIngest(
 
     // --- 4. Fundamentals + announcements --------------------------------
     if (includeFundamentals) {
-      const dead = recheckCompanyPages ? new Set<string>() : missingPageSymbols();
+      const dead = recheckCompanyPages ? new Set<string>() : await missingPageSymbols();
       const toFetch = fundamentalSymbols.filter((s) => !dead.has(s));
       result.pagesSkipped = fundamentalSymbols.length - toFetch.length;
 
@@ -671,57 +669,71 @@ function writeMarketWatchQuote(row: MarketWatchRow, date: string): boolean {
  * Never clobber high/low/change captured live from the /indices page, which
  * the timeseries does not carry.
  */
-function writeIndexLevelBar(
+function writeIndexLevelBars(
   indexCode: string,
-  bar: { date: string; close: number; open: number | null; volume: number | null },
+  bars: Array<{ date: string; close: number; open: number | null; volume: number | null }>,
 ) {
-  db.insert(indexLevels)
-    .values({
-      indexCode,
-      date: bar.date,
-      current: bar.close,
-      open: bar.open,
-      volume: bar.volume,
-    })
-    .onConflictDoUpdate({
-      target: [indexLevels.indexCode, indexLevels.date],
-      set: {
-        current: bar.close,
-        open: sql`coalesce(excluded.open, ${indexLevels.open})`,
-        volume: sql`coalesce(excluded.volume, ${indexLevels.volume})`,
-      },
-    })
-    .run();
+  if (bars.length === 0) return;
+  const CHUNK_SIZE = 200;
+  for (let i = 0; i < bars.length; i += CHUNK_SIZE) {
+    const chunk = bars.slice(i, i + CHUNK_SIZE);
+    db.insert(indexLevels)
+      .values(
+        chunk.map((bar) => ({
+          indexCode,
+          date: bar.date,
+          current: bar.close,
+          open: bar.open,
+          volume: bar.volume,
+        })),
+      )
+      .onConflictDoUpdate({
+        target: [indexLevels.indexCode, indexLevels.date],
+        set: {
+          current: sql`excluded.current`,
+          open: sql`coalesce(excluded.open, ${indexLevels.open})`,
+          volume: sql`coalesce(excluded.volume, ${indexLevels.volume})`,
+        },
+      })
+      .run();
+  }
 }
 
 /**
  * EOD bars have no high/low. Never overwrite a richer market-watch row's
  * intraday range — coalesce keeps whatever was already captured.
  */
-function writeEodBar(
+function writeEodBars(
   symbol: string,
-  bar: { date: string; close: number; open: number | null; volume: number | null },
+  bars: Array<{ date: string; close: number; open: number | null; volume: number | null }>,
 ) {
-  db.insert(quotesDaily)
-    .values({
-      symbol,
-      date: bar.date,
-      open: bar.open,
-      high: null,
-      low: null,
-      close: bar.close,
-      volume: bar.volume,
-      source: "eod",
-    })
-    .onConflictDoUpdate({
-      target: [quotesDaily.symbol, quotesDaily.date],
-      set: {
-        close: bar.close,
-        volume: sql`coalesce(excluded.volume, ${quotesDaily.volume})`,
-        open: sql`coalesce(excluded.open, ${quotesDaily.open})`,
-      },
-    })
-    .run();
+  if (bars.length === 0) return;
+  const CHUNK_SIZE = 200;
+  for (let i = 0; i < bars.length; i += CHUNK_SIZE) {
+    const chunk = bars.slice(i, i + CHUNK_SIZE);
+    db.insert(quotesDaily)
+      .values(
+        chunk.map((bar) => ({
+          symbol,
+          date: bar.date,
+          open: bar.open,
+          high: null,
+          low: null,
+          close: bar.close,
+          volume: bar.volume,
+          source: "eod" as const,
+        })),
+      )
+      .onConflictDoUpdate({
+        target: [quotesDaily.symbol, quotesDaily.date],
+        set: {
+          close: sql`excluded.close`,
+          volume: sql`coalesce(excluded.volume, ${quotesDaily.volume})`,
+          open: sql`coalesce(excluded.open, ${quotesDaily.open})`,
+        },
+      })
+      .run();
+  }
 }
 
 /** Store a payout row from the PSX payouts fragment. */

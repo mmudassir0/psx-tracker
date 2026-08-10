@@ -1,17 +1,35 @@
 import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
+import { drizzle as drizzleBetterSqlite, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import { drizzle as drizzleLibsql } from "drizzle-orm/libsql";
+import { createClient as createLibsqlClient } from "@libsql/client";
+import { loadEnvConfig } from "@next/env";
 import path from "node:path";
 import * as schema from "./schema";
 
-const DB_PATH = process.env.DB_PATH ?? path.join(process.cwd(), "data", "kmi30.db");
+// Automatically load .env and .env.local variables when running scripts/CLI
+loadEnvConfig(process.cwd());
 
-// Next dev reloads modules on every edit; without this the process leaks
-// SQLite handles until it hits the open-file limit.
+const DB_PATH = process.env.DB_PATH ?? path.join(process.cwd(), "data", "kmi30.db");
+const TURSO_DATABASE_URL = process.env.TURSO_DATABASE_URL;
+const TURSO_AUTH_TOKEN = process.env.TURSO_AUTH_TOKEN;
+
+export type AppDatabase = BetterSQLite3Database<typeof schema> & { $client: any };
+
 const globalForDb = globalThis as unknown as {
-  __kmi30Sqlite?: Database.Database;
+  __kmi30Db?: AppDatabase;
 };
 
-function createClient() {
+function createDbInstance(): AppDatabase {
+  if (TURSO_DATABASE_URL) {
+    console.log(`Connecting to Turso Cloud SQLite database (${TURSO_DATABASE_URL})...`);
+    const client = createLibsqlClient({
+      url: TURSO_DATABASE_URL,
+      authToken: TURSO_AUTH_TOKEN,
+    });
+    return drizzleLibsql(client, { schema }) as unknown as AppDatabase;
+  }
+
+  console.log("Connecting to local SQLite database...");
   const fs = require("node:fs") as typeof import("node:fs");
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
@@ -19,11 +37,10 @@ function createClient() {
   // WAL lets the dashboard read while an ingest run is writing.
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
-  return sqlite;
+  return drizzleBetterSqlite(sqlite, { schema }) as unknown as AppDatabase;
 }
 
-const sqlite = globalForDb.__kmi30Sqlite ?? createClient();
-if (process.env.NODE_ENV !== "production") globalForDb.__kmi30Sqlite = sqlite;
+export const db: AppDatabase = globalForDb.__kmi30Db ?? createDbInstance();
+if (process.env.NODE_ENV !== "production") globalForDb.__kmi30Db = db;
 
-export const db = drizzle(sqlite, { schema });
 export { schema, DB_PATH };
