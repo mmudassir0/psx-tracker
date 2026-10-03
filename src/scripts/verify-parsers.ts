@@ -19,7 +19,7 @@ async function main() {
   console.log("KMI30:", kmi30);
 
   console.log("\n== /market-watch ==");
-  const rows = parseMarketWatch(await psxFetch("/market-watch"));
+  const rows = parseMarketWatch(await psxFetch("/screener"));
   const members = rows.filter((r) => r.isKmi30);
   console.log(`parsed ${rows.length} symbols, ${members.length} in KMI30`);
   console.log(

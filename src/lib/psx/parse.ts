@@ -71,18 +71,19 @@ export function normalizeSymbol(raw: string): string {
  * CHANGE | CHANGE (%) | VOLUME
  */
 export function parseMarketWatch(html: string): MarketWatchRow[] {
+  // PSX retired /market-watch; /screener is the replacement. Columns:
+  // symbol, sector, listed-in (indexes), mkt cap, price, change %, ...
+  // It carries no OHLC or daily volume, so those stay null and LDCP is
+  // back-derived from the price and the change percentage.
   const $ = cheerio.load(html);
   const rows: MarketWatchRow[] = [];
 
   $("tr").each((_, tr) => {
-    const cells = $(tr)
-      .find("td")
-      .map((__, td) => clean($(td).text()))
-      .get();
-    if (cells.length < 11) return;
+    const tds = $(tr).find("td");
+    if (tds.length < 6) return;
+    const cells = tds.map((__, td) => clean($(td).text())).get();
 
     const rawSymbol = cells[0];
-    // Skip header/footer rows that survive the cell-count check.
     if (!rawSymbol || !/^[A-Z0-9._-]{2,20}$/.test(rawSymbol)) return;
     const symbol = normalizeSymbol(rawSymbol);
 
@@ -91,19 +92,28 @@ export function parseMarketWatch(html: string): MarketWatchRow[] {
       .map((s) => s.trim())
       .filter(Boolean);
 
+    const current = num(cells[4]);
+    const changePct = num($(tds[5]).attr("data-order") ?? cells[5]);
+    let ldcp: number | null = null;
+    let change: number | null = null;
+    if (current != null && changePct != null && changePct > -100) {
+      ldcp = Math.round((current / (1 + changePct / 100)) * 100) / 100;
+      change = Math.round((current - ldcp) * 100) / 100;
+    }
+
     rows.push({
       symbol,
       sectorCode: cells[1],
       indexes,
       isKmi30: indexes.includes("KMI30"),
-      ldcp: num(cells[3]),
-      open: num(cells[4]),
-      high: num(cells[5]),
-      low: num(cells[6]),
-      current: num(cells[7]),
-      change: num(cells[8]),
-      changePct: num(cells[9]),
-      volume: num(cells[10]),
+      ldcp,
+      open: null,
+      high: null,
+      low: null,
+      current,
+      change,
+      changePct,
+      volume: null,
     });
   });
 

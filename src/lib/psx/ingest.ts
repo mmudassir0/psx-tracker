@@ -302,7 +302,7 @@ export async function runIngest(
     // --- 2. Market watch: symbols, quotes, membership -------------------
     onProgress("Fetching market watch…");
     const marketRows = parseMarketWatch(
-      await psxFetch("/market-watch", { ttlMs: 0 }),
+      await psxFetch("/screener", { ttlMs: 0 }),
     );
     result.symbolsSeen = marketRows.length;
 
@@ -399,7 +399,12 @@ export async function runIngest(
             ),
           ];
     const memberSymbols = indexedSymbols;
-    if (backfillHistory) {
+    if (backfillHistory && !(await eodEndpointAvailable(memberSymbols[0]))) {
+      // PSX withdrew /timeseries/eod; without this probe every symbol burns
+      // a full retry cycle on a guaranteed 404.
+      errors.push("EOD history endpoint unavailable (404) — backfill skipped");
+      onProgress("EOD history endpoint unavailable — skipping backfill");
+    } else if (backfillHistory) {
       // Index codes work on the same timeseries endpoint as equities, which is
       // what makes a benchmark comparison possible at all.
       const indexCodes = [...byIndex.keys()];
@@ -456,6 +461,7 @@ export async function runIngest(
           ")…",
       );
       let done = 0;
+      let payoutsBlocked = false;
       await mapLimit(toFetch, concurrency, async (symbol) => {
         try {
           const companyHtml = await psxFetch(`/company/${symbol}`, {
@@ -551,7 +557,9 @@ export async function runIngest(
 
           // Real payout rates come from a separate POST fragment. Announcement
           // titles normally omit the rate, so this is the only source for it.
-          try {
+          if (payoutsBlocked) {
+            // skipped: endpoint refused an earlier request this run
+          } else try {
             const payoutRows = parsePayouts(
               await psxFetch("/company/payouts", {
                 form: { symbol },
@@ -564,7 +572,14 @@ export async function runIngest(
             }
             result.payoutsWritten += payoutRows.length;
           } catch (err) {
-            errors.push(`payouts ${symbol}: ${String(err)}`);
+            if (err instanceof PsxError && (err.status === 403 || err.status === 404)) {
+              // PSX now gates this fragment behind a session token; one
+              // refusal means every later symbol would be refused too.
+              if (!payoutsBlocked) errors.push(`payouts endpoint refused (${err.status}) — payouts skipped`);
+              payoutsBlocked = true;
+            } else {
+              errors.push(`payouts ${symbol}: ${String(err)}`);
+            }
           }
 
           result.fundamentalsFetched++;
@@ -640,6 +655,16 @@ async function upsertSymbol(row: MarketWatchRow) {
     .run();
 }
 
+async function eodEndpointAvailable(symbol: string | undefined): Promise<boolean> {
+  if (!symbol) return false;
+  try {
+    await psxFetch(`/timeseries/eod/${symbol}`, { ttlMs: 0, retries: 0 });
+    return true;
+  } catch (err) {
+    return !(err instanceof PsxError && err.status === 404);
+  }
+}
+
 /** Live quote carries full OHLC, so it always wins over an EOD row. */
 async function writeMarketWatchQuote(row: MarketWatchRow, date: string): Promise<boolean> {
   const close = row.current ?? row.ldcp;
@@ -661,12 +686,12 @@ async function writeMarketWatchQuote(row: MarketWatchRow, date: string): Promise
     .onConflictDoUpdate({
       target: [quotesDaily.symbol, quotesDaily.date],
       set: {
-        open: row.open,
-        high: row.high,
-        low: row.low,
+        open: sql`coalesce(${row.open}, ${quotesDaily.open})`,
+        high: sql`coalesce(${row.high}, ${quotesDaily.high})`,
+        low: sql`coalesce(${row.low}, ${quotesDaily.low})`,
         close,
         ldcp: row.ldcp,
-        volume: row.volume,
+        volume: sql`coalesce(${row.volume}, ${quotesDaily.volume})`,
         source: "market-watch",
       },
     })
