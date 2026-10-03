@@ -126,6 +126,8 @@ async function previousMemberCount(indexCode: string, date: string): Promise<num
  * duplicate flat day, so outside trading hours we trust the EOD timeseries,
  * which is stamped at the closing bell.
  */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 export async function resolveSessionDate(): Promise<string> {
   if (isMarketOpen()) return todayPkt();
 
@@ -139,6 +141,21 @@ export async function resolveSessionDate(): Promise<string> {
     } catch {
       // Try the next reference symbol.
     }
+  }
+
+  // PSX withdrew the EOD timeseries; the home page's index tiles carry an
+  // "As of Oct 2, 2026 4:50 PM" stamp for the session they show.
+  try {
+    const home = await psxFetch("/", { ttlMs: 60_000 });
+    const m = home.match(/As of\s+([A-Z][a-z]{2}) (\d{1,2}), (\d{4})/);
+    if (m) {
+      const month = MONTHS.indexOf(m[1]) + 1;
+      if (month > 0) {
+        return `${m[3]}-${String(month).padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+      }
+    }
+  } catch {
+    // Fall through.
   }
 
   // Every reference lookup failed; today is the least-wrong fallback.
