@@ -239,7 +239,7 @@ export async function runIngest(
     fundamentalScope = "all",
     fundamentalIndices = [TRACKED_INDEX],
     recheckCompanyPages = false,
-    concurrency = 8,
+    concurrency = 4,
     trigger = "cli",
     onProgress: onProgressOption = () => {},
   } = options;
@@ -488,8 +488,10 @@ export async function runIngest(
       let payoutsBlocked = false;
       await mapLimit(toFetch, concurrency, async (symbol) => {
         try {
+          // Extra retries: PSX rate-limits bursts of company pages (429).
           const companyHtml = await psxFetch(`/company/${symbol}`, {
             ttlMs: 0,
+            retries: 4,
           });
           const page = parseCompanyPage(companyHtml);
 

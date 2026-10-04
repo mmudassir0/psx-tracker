@@ -290,6 +290,16 @@ export async function getIngestStatusAction(): Promise<IngestStatus> {
 export async function startIngestAction(
   scope: IngestScope = "full",
 ): Promise<ActionState> {
+  // PSX answers Vercel's IPs with HTTP 462, so a run started here can only
+  // fail. The daily GitHub Actions workflow does the real updates.
+  if (process.env.VERCEL) {
+    return {
+      ok: false,
+      message:
+        "PSX blocks refreshes from this server. Data updates automatically every weekday around 4–6 PM PKT.",
+    };
+  }
+
   const current = await getIngestStatusAction();
   if (current.running) {
     return {
