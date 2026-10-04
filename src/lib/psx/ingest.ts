@@ -332,10 +332,8 @@ export async function runIngest(
       );
     }
 
-    for (const row of marketRows) {
-      await upsertSymbol(row);
-      if (await writeMarketWatchQuote(row, date)) result.quotesWritten++;
-    }
+    await upsertSymbols(marketRows);
+    result.quotesWritten = await writeMarketWatchQuotes(marketRows, date);
 
     // Group every symbol by every index it belongs to. The membership column
     // covers all 17 PSX indices, so this costs nothing beyond the page we
@@ -382,10 +380,14 @@ export async function runIngest(
         continue;
       }
 
-      for (const symbol of symbolsInIndex) {
+      for (let i = 0; i < symbolsInIndex.length; i += WRITE_CHUNK) {
         await db
           .insert(constituents)
-          .values({ date, indexCode: code, symbol })
+          .values(
+            symbolsInIndex
+              .slice(i, i + WRITE_CHUNK)
+              .map((symbol) => ({ date, indexCode: code, symbol })),
+          )
           .onConflictDoNothing()
           .run();
       }
@@ -488,17 +490,20 @@ export async function runIngest(
 
           // Financials and ratios are server-rendered in the same document,
           // so this costs no extra request.
-          for (const cell of parseFinancials(companyHtml)) {
+          const cells = parseFinancials(companyHtml);
+          for (let i = 0; i < cells.length; i += WRITE_CHUNK) {
             await db
               .insert(financialsTable)
-              .values({
-                symbol,
-                fiscalYear: cell.fiscalYear,
-                section: cell.section,
-                lineItem: cell.lineItem,
-                value: cell.value,
-                unit: cell.unit,
-              })
+              .values(
+                cells.slice(i, i + WRITE_CHUNK).map((cell) => ({
+                  symbol,
+                  fiscalYear: cell.fiscalYear,
+                  section: cell.section,
+                  lineItem: cell.lineItem,
+                  value: cell.value,
+                  unit: cell.unit,
+                })),
+              )
               .onConflictDoUpdate({
                 target: [
                   financialsTable.symbol,
@@ -506,11 +511,11 @@ export async function runIngest(
                   financialsTable.section,
                   financialsTable.lineItem,
                 ],
-                set: { value: cell.value, unit: cell.unit },
+                set: { value: sql`excluded.value`, unit: sql`excluded.unit` },
               })
               .run();
-            result.financialCellsWritten++;
           }
+          result.financialCellsWritten += cells.length;
 
           await db
             .insert(companyStats)
@@ -551,26 +556,25 @@ export async function runIngest(
               .run();
           }
 
-          for (const a of page.announcements) {
-            const category = categorise(a.title);
-            const id = stableId(symbol, a.date, a.title);
+          const announcementRows = page.announcements.map((a) => ({
+            id: stableId(symbol, a.date, a.title),
+            symbol,
+            date: a.date,
+            title: a.title,
+            url: a.url,
+            category: categorise(a.title),
+          }));
+          for (let i = 0; i < announcementRows.length; i += WRITE_CHUNK) {
             await db
               .insert(announcementsTable)
-              .values({
-                id,
-                symbol,
-                date: a.date,
-                title: a.title,
-                url: a.url,
-                category,
-              })
+              .values(announcementRows.slice(i, i + WRITE_CHUNK))
               .onConflictDoUpdate({
                 target: announcementsTable.id,
-                set: { url: a.url, category },
+                set: { url: sql`excluded.url`, category: sql`excluded.category` },
               })
               .run();
-            result.announcementsWritten++;
           }
+          result.announcementsWritten += announcementRows.length;
 
           // Real payout rates come from a separate POST fragment. Announcement
           // titles normally omit the rate, so this is the only source for it.
@@ -650,26 +654,37 @@ export async function runIngest(
   }
 }
 
-async function upsertSymbol(row: MarketWatchRow) {
-  await db
-    .insert(symbols)
-    .values({
-      symbol: row.symbol,
-      sectorCode: row.sectorCode,
-      indexes: row.indexes.join(","),
-      isKmi30: row.isKmi30,
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: symbols.symbol,
-      set: {
-        sectorCode: row.sectorCode,
-        indexes: row.indexes.join(","),
-        isKmi30: row.isKmi30,
-        updatedAt: new Date(),
-      },
-    })
-    .run();
+/**
+ * Rows per multi-row write. One round-trip per row is fine on a local file but
+ * costs minutes against Turso, which would blow a serverless time limit.
+ */
+const WRITE_CHUNK = 100;
+
+async function upsertSymbols(rows: MarketWatchRow[]) {
+  const now = new Date();
+  for (let i = 0; i < rows.length; i += WRITE_CHUNK) {
+    await db
+      .insert(symbols)
+      .values(
+        rows.slice(i, i + WRITE_CHUNK).map((row) => ({
+          symbol: row.symbol,
+          sectorCode: row.sectorCode,
+          indexes: row.indexes.join(","),
+          isKmi30: row.isKmi30,
+          updatedAt: now,
+        })),
+      )
+      .onConflictDoUpdate({
+        target: symbols.symbol,
+        set: {
+          sectorCode: sql`excluded.sector_code`,
+          indexes: sql`excluded.indexes`,
+          isKmi30: sql`excluded.is_kmi30`,
+          updatedAt: sql`excluded.updated_at`,
+        },
+      })
+      .run();
+  }
 }
 
 async function eodEndpointAvailable(symbol: string | undefined): Promise<boolean> {
@@ -682,14 +697,15 @@ async function eodEndpointAvailable(symbol: string | undefined): Promise<boolean
   }
 }
 
-/** Live quote carries full OHLC, so it always wins over an EOD row. */
-async function writeMarketWatchQuote(row: MarketWatchRow, date: string): Promise<boolean> {
-  const close = row.current ?? row.ldcp;
-  if (close == null) return false;
-
-  await db
-    .insert(quotesDaily)
-    .values({
+/**
+ * Live quotes always win over an EOD row for close/LDCP. /screener has no
+ * OHLC or daily volume, so coalesce keeps whatever an earlier source stored.
+ */
+async function writeMarketWatchQuotes(rows: MarketWatchRow[], date: string): Promise<number> {
+  const values = rows.flatMap((row) => {
+    const close = row.current ?? row.ldcp;
+    if (close == null) return [];
+    return [{
       symbol: row.symbol,
       date,
       open: row.open,
@@ -698,22 +714,29 @@ async function writeMarketWatchQuote(row: MarketWatchRow, date: string): Promise
       close,
       ldcp: row.ldcp,
       volume: row.volume,
-      source: "market-watch",
-    })
-    .onConflictDoUpdate({
-      target: [quotesDaily.symbol, quotesDaily.date],
-      set: {
-        open: sql`coalesce(${row.open}, ${quotesDaily.open})`,
-        high: sql`coalesce(${row.high}, ${quotesDaily.high})`,
-        low: sql`coalesce(${row.low}, ${quotesDaily.low})`,
-        close,
-        ldcp: row.ldcp,
-        volume: sql`coalesce(${row.volume}, ${quotesDaily.volume})`,
-        source: "market-watch",
-      },
-    })
-    .run();
-  return true;
+      source: "market-watch" as const,
+    }];
+  });
+
+  for (let i = 0; i < values.length; i += WRITE_CHUNK) {
+    await db
+      .insert(quotesDaily)
+      .values(values.slice(i, i + WRITE_CHUNK))
+      .onConflictDoUpdate({
+        target: [quotesDaily.symbol, quotesDaily.date],
+        set: {
+          open: sql`coalesce(excluded.open, ${quotesDaily.open})`,
+          high: sql`coalesce(excluded.high, ${quotesDaily.high})`,
+          low: sql`coalesce(excluded.low, ${quotesDaily.low})`,
+          close: sql`excluded.close`,
+          ldcp: sql`excluded.ldcp`,
+          volume: sql`coalesce(excluded.volume, ${quotesDaily.volume})`,
+          source: sql`excluded.source`,
+        },
+      })
+      .run();
+  }
+  return values.length;
 }
 
 /**

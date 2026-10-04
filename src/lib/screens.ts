@@ -243,14 +243,19 @@ export async function recordScreenHits(date?: string): Promise<number> {
   const screens = await getAllScreens();
 
   for (const screen of screens) {
-    const matches = evaluateScreen(screen, rows);
-    for (const match of matches) {
+    const values = evaluateScreen(screen, rows).map((match) => ({
+      screenId: screen.id,
+      date: asOf,
+      symbol: match.symbol,
+    }));
+    // Multi-row inserts: one round-trip per hit is too slow against Turso.
+    for (let i = 0; i < values.length; i += 100) {
       await db.insert(screenHits)
-        .values({ screenId: screen.id, date: asOf, symbol: match.symbol })
+        .values(values.slice(i, i + 100))
         .onConflictDoNothing()
         .run();
-      written++;
     }
+    written += values.length;
   }
 
   return written;
