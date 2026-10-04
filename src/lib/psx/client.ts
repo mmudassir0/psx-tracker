@@ -96,9 +96,10 @@ export async function psxFetch(
       // just triples the cost of a known-dead request.
       if (lastStatus === 500) break;
 
-      // Exponential backoff; the portal rate-limits bursts.
+      // Exponential backoff; the portal rate-limits bursts. An explicit 429
+      // needs a much longer pause than a transient network blip.
       if (attempt < retries) {
-        await sleep(500 * 2 ** attempt);
+        await sleep((lastStatus === 429 ? 5_000 : 500) * 2 ** attempt);
       }
     } finally {
       clearTimeout(timer);

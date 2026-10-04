@@ -2,7 +2,8 @@ name: PSX Daily Data Ingest
 
 on:
   schedule:
-    # 11:00 UTC = 16:00 PKT (Monday to Friday)
+    # 11:00 UTC = 16:00 PKT (Monday to Friday). Runs here rather than as a
+    # Vercel Cron because PSX refuses Vercel's IPs (HTTP 462).
     - cron: "0 11 * * 1-5"
   workflow_dispatch:
 
@@ -25,4 +26,4 @@ jobs:
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
-        run: npx tsx src/scripts/ingest.ts
+        run: npx tsx src/scripts/ingest.ts --trigger=schedule

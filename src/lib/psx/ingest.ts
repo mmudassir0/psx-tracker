@@ -24,7 +24,7 @@ import {
   type MarketWatchRow,
   type PayoutRow,
 } from "./parse";
-import { todayPkt, isMarketOpen } from "@/lib/dates";
+import { todayPkt, isMarketOpen, addDays, pktDateToUtc } from "@/lib/dates";
 
 export const TRACKED_INDEX = "KMI30";
 
@@ -158,8 +158,13 @@ export async function resolveSessionDate(): Promise<string> {
     // Fall through.
   }
 
-  // Every reference lookup failed; today is the least-wrong fallback.
-  return todayPkt();
+  // Every reference lookup failed. Today is the least-wrong fallback, but
+  // never a weekend: those quotes belong to Friday's session.
+  let fallback = todayPkt();
+  while ([0, 6].includes(pktDateToUtc(fallback).getUTCDay())) {
+    fallback = addDays(fallback, -1);
+  }
+  return fallback;
 }
 
 /** Stable id so re-ingesting the same announcement updates instead of duplicating. */
@@ -596,7 +601,7 @@ export async function runIngest(
             if (err instanceof PsxError && (err.status === 403 || err.status === 404)) {
               // PSX now gates this fragment behind a session token; one
               // refusal means every later symbol would be refused too.
-              if (!payoutsBlocked) errors.push(`payouts endpoint refused (${err.status}) — payouts skipped`);
+              if (!payoutsBlocked) onProgress(`  payouts endpoint refused (${err.status}) — payouts skipped`);
               payoutsBlocked = true;
             } else {
               errors.push(`payouts ${symbol}: ${String(err)}`);
