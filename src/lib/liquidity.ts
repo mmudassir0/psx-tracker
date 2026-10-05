@@ -37,11 +37,16 @@ export interface LiquidityReport {
 }
 
 export async function buildLiquidityReport({
+  userId,
   indexCode = TRACKED_INDEX,
   heldOnly = false,
-}: { indexCode?: string; heldOnly?: boolean } = {}): Promise<LiquidityReport> {
+}: {
+  userId: string | null;
+  indexCode?: string;
+  heldOnly?: boolean;
+}): Promise<LiquidityReport> {
   const constituents = await getConstituents(indexCode);
-  const portfolio = await getPortfolio();
+  const portfolio = await getPortfolio(userId);
   const held = new Map(
     portfolio.holdings
       .filter((h) => h.quantity > 0)

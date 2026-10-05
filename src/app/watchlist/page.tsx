@@ -1,18 +1,20 @@
 import Link from "next/link";
+import { requireUser } from "@/lib/auth";
 import { db } from "@/db";
 import { watchlist } from "@/db/schema";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { getConstituent, getConstituents, isDatabaseEmpty } from "@/lib/market";
 import { removeFromWatchlistAction } from "@/app/actions";
 import { WatchlistForm } from "@/components/WatchlistForm";
 import {
   Card, PageHeader, EmptyState, SymbolLink, TableWrap, Th, Td, Badge,
 } from "@/components/ui";
-import { money, pct, prettyDate, toneClass } from "@/lib/format";
+import { money, pct, toneClass } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
 export default async function WatchlistPage() {
+  const user = await requireUser("/watchlist");
   if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
@@ -21,7 +23,7 @@ export default async function WatchlistPage() {
     );
   }
 
-  const rows = await db.select().from(watchlist).orderBy(desc(watchlist.addedAt)).all();
+  const rows = await db.select().from(watchlist).where(eq(watchlist.userId, user.id)).orderBy(desc(watchlist.addedAt)).all();
   const universe = await getConstituents("ALLSHR");
   const suggestions = universe.map((c) => c.symbol);
 

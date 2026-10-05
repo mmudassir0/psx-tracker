@@ -173,11 +173,13 @@ export const payouts = sqliteTable(
   ],
 );
 
-/** User's ledger. Holdings are derived from this, never stored directly. */
+/** A user's ledger. Holdings are derived from this, never stored directly. */
 export const transactions = sqliteTable(
   "transactions",
   {
     id: text("id").primaryKey(),
+    /** Owner. Null only for rows from before accounts, until claimed. */
+    userId: text("user_id"),
     symbol: text("symbol").notNull(),
     date: text("date").notNull(),
     type: text("type", {
@@ -191,12 +193,16 @@ export const transactions = sqliteTable(
     note: text("note"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   },
-  (t) => [index("transactions_symbol_idx").on(t.symbol)],
+  (t) => [
+    index("transactions_symbol_idx").on(t.symbol),
+    index("transactions_user_idx").on(t.userId),
+  ],
 );
 
 /** User-defined alert rules, evaluated after each ingest. */
 export const alerts = sqliteTable("alerts", {
   id: text("id").primaryKey(),
+  userId: text("user_id"),
   /** Null symbol = portfolio-wide rule (used by dropped_from_kmi30). */
   symbol: text("symbol"),
   kind: text("kind", {
@@ -223,6 +229,7 @@ export const alertEvents = sqliteTable(
   "alert_events",
   {
     id: text("id").primaryKey(),
+    userId: text("user_id"),
     alertId: text("alert_id").notNull(),
     symbol: text("symbol"),
     date: text("date").notNull(),
@@ -233,7 +240,10 @@ export const alertEvents = sqliteTable(
       .default(false),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   },
-  (t) => [index("alert_events_date_idx").on(t.date)],
+  (t) => [
+    index("alert_events_date_idx").on(t.date),
+    index("alert_events_user_idx").on(t.userId),
+  ],
 );
 
 /**
@@ -292,6 +302,7 @@ export const screenHits = sqliteTable(
 /** User-defined screens. Built-in ones live in code, not here. */
 export const customScreens = sqliteTable("custom_screens", {
   id: text("id").primaryKey(),
+  userId: text("user_id"),
   name: text("name").notNull(),
   description: text("description"),
   /** JSON-encoded ScreenRule[]. */
@@ -301,16 +312,33 @@ export const customScreens = sqliteTable("custom_screens", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
-/** Symbols being followed without owning them — no effect on the ledger. */
-export const watchlist = sqliteTable("watchlist", {
-  symbol: text("symbol").primaryKey(),
-  note: text("note"),
-  /** Price at the moment it was added, so drift since is measurable. */
-  addedPrice: real("added_price"),
-  addedAt: integer("added_at", { mode: "timestamp" }).notNull(),
-});
+/** Symbols a user follows without owning them — no effect on the ledger. */
+export const watchlist = sqliteTable(
+  "watchlist",
+  {
+    userId: text("user_id").notNull(),
+    symbol: text("symbol").notNull(),
+    note: text("note"),
+    /** Price at the moment it was added, so drift since is measurable. */
+    addedPrice: real("added_price"),
+    addedAt: integer("added_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.symbol] })],
+);
 
-/** Small key/value store for user preferences (zakat inputs, and similar). */
+/** Per-user preferences (zakat inputs), JSON-encoded. */
+export const userSettings = sqliteTable(
+  "user_settings",
+  {
+    userId: text("user_id").notNull(),
+    key: text("key").notNull(),
+    value: text("value").notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.key] })],
+);
+
+/** App-wide key/value settings (notification preferences). */
 export const appSettings = sqliteTable("app_settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
@@ -332,4 +360,88 @@ export const ingestRuns = sqliteTable("ingest_runs", {
   progress: text("progress"),
   /** How the run was launched, for the history list. */
   trigger: text("trigger", { enum: ["cli", "ui", "schedule"] }),
+});
+
+// ---------------------------------------------------------------------------
+// Accounts (Better Auth). Property names are the field names Better Auth
+// expects; role/banned/banReason/banExpires and impersonatedBy are the admin
+// plugin's additions.
+// ---------------------------------------------------------------------------
+
+export const user = sqliteTable("user", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  emailVerified: integer("email_verified", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  image: text("image"),
+  role: text("role").default("user"),
+  banned: integer("banned", { mode: "boolean" }).default(false),
+  banReason: text("ban_reason"),
+  banExpires: integer("ban_expires", { mode: "timestamp_ms" }),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const session = sqliteTable(
+  "session",
+  {
+    id: text("id").primaryKey(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    token: text("token").notNull().unique(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    impersonatedBy: text("impersonated_by"),
+  },
+  (t) => [index("session_user_idx").on(t.userId)],
+);
+
+export const account = sqliteTable(
+  "account",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: integer("access_token_expires_at", { mode: "timestamp_ms" }),
+    refreshTokenExpiresAt: integer("refresh_token_expires_at", { mode: "timestamp_ms" }),
+    scope: text("scope"),
+    /** Password hash for email accounts; never the password itself. */
+    password: text("password"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [index("account_user_idx").on(t.userId)],
+);
+
+export const verification = sqliteTable(
+  "verification",
+  {
+    id: text("id").primaryKey(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [index("verification_identifier_idx").on(t.identifier)],
+);
+
+/** Login/sign-up attempt counters, so limits hold across serverless instances. */
+export const rateLimit = sqliteTable("rate_limit", {
+  id: text("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  count: integer("count").notNull(),
+  lastRequest: integer("last_request").notNull(),
 });

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { transactions } from "@/db/schema";
 import { getConstituents, type ConstituentView } from "@/lib/market";
@@ -57,10 +57,16 @@ export interface PortfolioSummary {
   droppedHoldings: string[];
 }
 
-export async function getHoldings(): Promise<Holding[]> {
+/**
+ * Every personal function takes the owner's id explicitly. Pages and actions
+ * resolve it from the session; a null id (logged out) means an empty ledger.
+ */
+export async function getHoldings(userId: string | null): Promise<Holding[]> {
+  if (!userId) return [];
   const ledger = await db
     .select()
     .from(transactions)
+    .where(eq(transactions.userId, userId))
     .orderBy(asc(transactions.date), asc(transactions.createdAt))
     .all();
 
@@ -120,8 +126,10 @@ export async function getHoldings(): Promise<Holding[]> {
 }
 
 /** Holdings joined with live prices, index weights and concentration analysis. */
-export async function getPortfolio(): Promise<PortfolioSummary> {
-  const holdings = await getHoldings();
+export async function getPortfolio(
+  userId: string | null,
+): Promise<PortfolioSummary> {
+  const holdings = await getHoldings(userId);
   const constituents = await getConstituents();
   const bySymbol = new Map<string, ConstituentView>(
     constituents.map((c) => [c.symbol, c]),
@@ -249,15 +257,17 @@ export async function getPortfolio(): Promise<PortfolioSummary> {
   };
 }
 
-export async function listTransactions() {
+export async function listTransactions(userId: string | null) {
+  if (!userId) return [];
   return await db
     .select()
     .from(transactions)
+    .where(eq(transactions.userId, userId))
     .orderBy(desc(transactions.date), desc(transactions.createdAt))
     .all();
 }
 
-export async function addTransaction(input: {
+export async function addTransaction(userId: string, input: {
   symbol: string;
   date: string;
   type: TransactionType;
@@ -271,6 +281,7 @@ export async function addTransaction(input: {
     .insert(transactions)
     .values({
       id,
+      userId,
       symbol: input.symbol.toUpperCase().trim(),
       date: input.date,
       type: input.type,
@@ -284,6 +295,10 @@ export async function addTransaction(input: {
   return id;
 }
 
-export async function deleteTransaction(id: string) {
-  await db.delete(transactions).where(eq(transactions.id, id)).run();
+export async function deleteTransaction(userId: string, id: string) {
+  // Scoped to the owner, so one user can never delete another's row by id.
+  await db
+    .delete(transactions)
+    .where(and(eq(transactions.id, id), eq(transactions.userId, userId)))
+    .run();
 }

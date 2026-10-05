@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireUser } from "@/lib/auth";
 import { notFound } from "next/navigation";
 import { getScreen, toPreviewRows } from "@/lib/screens";
 import { isDatabaseEmpty } from "@/lib/market";
@@ -12,6 +13,7 @@ export default async function EditScreenPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const user = await requireUser("/screens");
   if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
@@ -21,7 +23,7 @@ export default async function EditScreenPage({
   }
 
   const { id } = await params;
-  const screen = await getScreen(id);
+  const screen = await getScreen(user.id, id);
   if (!screen) notFound();
 
   const previewRows = await toPreviewRows();

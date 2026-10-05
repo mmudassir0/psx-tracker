@@ -2,15 +2,15 @@
  * Demo holdings, so the portfolio-dependent pages have something to show
  * before real transactions exist.
  *
- *   npm run seed:demo    add them
- *   npm run seed:clear   remove them
+ *   npm run seed:demo -- you@example.com    add them to that account
+ *   npm run seed:clear -- you@example.com   remove them
  *
  * Every row is tagged with DEMO_NOTE. Nothing else touches transactions
  * carrying that note, so clearing is exact and can never eat real entries.
  */
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { transactions } from "@/db/schema";
+import { transactions, user } from "@/db/schema";
 import { addTransaction, listTransactions } from "@/lib/portfolio";
 
 export const DEMO_NOTE = "DEMO";
@@ -53,34 +53,43 @@ const DEMO_TRANSACTIONS: {
   { symbol: "PSO", date: "2026-05-22", type: "sell", quantity: 250, price: 268, fees: 335 },
 ];
 
-export function seedDemo(): number {
-  clearDemo();
+export async function seedDemo(userId: string): Promise<number> {
+  await clearDemo(userId);
   for (const tx of DEMO_TRANSACTIONS) {
-    addTransaction({ ...tx, fees: tx.fees ?? 0, note: DEMO_NOTE });
+    await addTransaction(userId, { ...tx, fees: tx.fees ?? 0, note: DEMO_NOTE });
   }
   return DEMO_TRANSACTIONS.length;
 }
 
-export function clearDemo(): number {
-  return db.delete(transactions).where(eq(transactions.note, DEMO_NOTE)).run()
-    .changes;
-}
-
-export async function hasDemoData(): Promise<boolean> {
-  const txs = await listTransactions();
-  return txs.some((t) => t.note === DEMO_NOTE);
+export async function clearDemo(userId: string): Promise<number> {
+  const before = (await listTransactions(userId)).filter((t) => t.note === DEMO_NOTE).length;
+  await db
+    .delete(transactions)
+    .where(and(eq(transactions.userId, userId), eq(transactions.note, DEMO_NOTE)))
+    .run();
+  return before;
 }
 
 async function main() {
   const mode = process.argv.includes("--clear") ? "clear" : "seed";
+  const email = process.argv.slice(2).find((a) => a.includes("@"))?.toLowerCase();
+  if (!email) {
+    console.error("usage: npm run seed:demo -- you@example.com   (or seed:clear)");
+    process.exit(1);
+  }
+  const owner = await db.select().from(user).where(eq(user.email, email)).get();
+  if (!owner) {
+    console.error(`No account with email ${email}. Sign up on the site first.`);
+    process.exit(1);
+  }
 
   if (mode === "clear") {
-    const removed = clearDemo();
-    console.log(`Removed ${removed} demo transaction(s).`);
+    const removed = await clearDemo(owner.id);
+    console.log(`Removed ${removed} demo transaction(s) from ${email}.`);
     return;
   }
 
-  const txs = await listTransactions();
+  const txs = await listTransactions(owner.id);
   const real = txs.filter((t) => t.note !== DEMO_NOTE).length;
   if (real > 0) {
     console.log(
@@ -88,10 +97,12 @@ async function main() {
     );
   }
 
-  const added = seedDemo();
-  console.log(`Added ${added} demo transactions, all tagged "${DEMO_NOTE}".`);
-  console.log("Remove them any time with:  npm run seed:clear");
+  const added = await seedDemo(owner.id);
+  console.log(`Added ${added} demo transactions to ${email}, all tagged "${DEMO_NOTE}".`);
+  console.log(`Remove them any time with:  npm run seed:clear -- ${email}`);
 }
 
-// Only run the CLI when invoked directly, not when imported by a page.
-if (process.argv[1]?.includes("seed-demo")) main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

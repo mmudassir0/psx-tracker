@@ -1,3 +1,4 @@
+import { getCurrentUserId } from "@/lib/auth";
 import {
   getAllSymbolViews,
   getMarketBreadth,
@@ -50,7 +51,7 @@ export default async function MoversPage({
   const breadth = await getMarketBreadth(rows);
   const movers = await getMovers(rows, 15);
 
-  const portfolio = await getPortfolio();
+  const portfolio = await getPortfolio(await getCurrentUserId());
   const held = new Set(
     portfolio.holdings.filter((h) => h.quantity > 0).map((h) => h.symbol),
   );

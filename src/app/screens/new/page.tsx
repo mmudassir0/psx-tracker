@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireUser } from "@/lib/auth";
 import { toPreviewRows } from "@/lib/screens";
 import { isDatabaseEmpty } from "@/lib/market";
 import { ScreenBuilder } from "@/components/ScreenBuilder";
@@ -7,6 +8,7 @@ import { Card, PageHeader, EmptyState } from "@/components/ui";
 export const dynamic = "force-dynamic";
 
 export default async function NewScreenPage() {
+  await requireUser("/screens/new");
   if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">

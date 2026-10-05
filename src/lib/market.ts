@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { and, desc, eq, gte, sql, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -55,7 +56,7 @@ export interface ConstituentView {
 }
 
 /** Most recent date for which we have any quote data. */
-export async function latestQuoteDate(): Promise<string | null> {
+async function latestQuoteDateUncached(): Promise<string | null> {
   const row = await db
     .select({ date: quotesDaily.date })
     .from(quotesDaily)
@@ -66,7 +67,7 @@ export async function latestQuoteDate(): Promise<string | null> {
 }
 
 /** Most recent date on which we captured a membership snapshot for an index. */
-export async function latestConstituentDate(
+async function latestConstituentDateUncached(
   indexCode: string = TRACKED_INDEX,
 ): Promise<string | null> {
   const row = await db
@@ -80,7 +81,7 @@ export async function latestConstituentDate(
 }
 
 /** Every index we hold a membership snapshot for. */
-export async function getTrackedIndexCodes(): Promise<string[]> {
+async function getTrackedIndexCodesUncached(): Promise<string[]> {
   const rows = await db
     .selectDistinct({ indexCode: constituents.indexCode })
     .from(constituents)
@@ -232,11 +233,19 @@ async function fetchBulkViewMaps(
           )
           .all()
       : Promise.resolve([]),
+    // Newest row per symbol only. A fundamentals run adds a row per company
+    // per day, so fetching every row and keeping the first grows forever.
     db
       .select()
       .from(companyStats)
-      .where(inArray(companyStats.symbol, symbolsList))
-      .orderBy(desc(companyStats.date))
+      .where(
+        and(
+          inArray(companyStats.symbol, symbolsList),
+          sql`(${companyStats.symbol}, ${companyStats.date}) in (
+            select symbol, max(date) from company_stats group by symbol
+          )`,
+        ),
+      )
       .all(),
     getTrailingDividendMap(),
     getLatestMetricMap(METRIC_EPS_GROWTH, symbolsList),
@@ -262,7 +271,7 @@ async function fetchBulkViewMaps(
   };
 }
 
-export async function getConstituents(
+async function getConstituentsUncached(
   indexCode: string = TRACKED_INDEX,
 ): Promise<ConstituentView[]> {
   const memberDate = await latestConstituentDate(indexCode);
@@ -457,58 +466,48 @@ export interface IndexSummary {
 }
 
 export async function getIndexSummaries(): Promise<IndexSummary[]> {
-  const trackedCodes = await getTrackedIndexCodes();
-  const levelRows = await db
-    .selectDistinct({ indexCode: indexLevels.indexCode })
-    .from(indexLevels)
-    .all();
-  const codes = [
-    ...new Set([...trackedCodes, ...levelRows.map((r) => r.indexCode)]),
-  ];
+  // Aggregate in SQL: these tables hold one row per index (or member) per
+  // day, and only the newest of each is wanted.
+  const [levelRows, snapshotRows] = await Promise.all([
+    db
+      .select({
+        code: indexLevels.indexCode,
+        current: indexLevels.current,
+        changePct: indexLevels.changePct,
+      })
+      .from(indexLevels)
+      .where(
+        sql`(${indexLevels.indexCode}, ${indexLevels.date}) in (
+          select index_code, max(date) from index_levels group by index_code
+        )`,
+      )
+      .all(),
+    db
+      .select({
+        code: constituents.indexCode,
+        date: constituents.date,
+        count: sql<number>`count(*)`,
+      })
+      .from(constituents)
+      .where(
+        sql`(${constituents.indexCode}, ${constituents.date}) in (
+          select index_code, max(date) from constituents group by index_code
+        )`,
+      )
+      .groupBy(constituents.indexCode, constituents.date)
+      .all(),
+  ]);
 
-  const allLevels = await db
-    .select()
-    .from(indexLevels)
-    .orderBy(desc(indexLevels.date))
-    .all();
-  const levelMap = new Map<string, typeof indexLevels.$inferSelect>();
-  for (const l of allLevels) {
-    if (!levelMap.has(l.indexCode)) levelMap.set(l.indexCode, l);
-  }
-
-  const allSnapshots = await db
-    .select({ indexCode: constituents.indexCode, date: constituents.date })
-    .from(constituents)
-    .orderBy(desc(constituents.date))
-    .all();
-  const snapshotDateMap = new Map<string, string>();
-  for (const s of allSnapshots) {
-    if (!snapshotDateMap.has(s.indexCode))
-      snapshotDateMap.set(s.indexCode, s.date);
-  }
-
-  const countsRows = await db
-    .select({
-      indexCode: constituents.indexCode,
-      date: constituents.date,
-      count: sql<number>`count(*)`,
-    })
-    .from(constituents)
-    .groupBy(constituents.indexCode, constituents.date)
-    .all();
-  const countMap = new Map<string, number>();
-  for (const c of countsRows) {
-    if (snapshotDateMap.get(c.indexCode) === c.date) {
-      countMap.set(c.indexCode, c.count);
-    }
-  }
+  const levelMap = new Map(levelRows.map((l) => [l.code, l]));
+  const snapshotMap = new Map(snapshotRows.map((s) => [s.code, s]));
+  const codes = [...new Set([...snapshotMap.keys(), ...levelMap.keys()])];
 
   return codes.map((code) => ({
     code,
     level: levelMap.get(code)?.current ?? null,
     changePct: levelMap.get(code)?.changePct ?? null,
-    memberCount: countMap.get(code) ?? 0,
-    snapshotDate: snapshotDateMap.get(code) ?? null,
+    memberCount: snapshotMap.get(code)?.count ?? 0,
+    snapshotDate: snapshotMap.get(code)?.date ?? null,
   }));
 }
 
@@ -533,7 +532,7 @@ export async function getSymbolMeta(symbol: string) {
   );
 }
 
-export async function isDatabaseEmpty(): Promise<boolean> {
+async function isDatabaseEmptyUncached(): Promise<boolean> {
   try {
     const row = await db
       .select({ count: sql<number>`count(*)` })
@@ -545,7 +544,7 @@ export async function isDatabaseEmpty(): Promise<boolean> {
   }
 }
 
-export async function getAllSymbolViews(): Promise<ConstituentView[]> {
+async function getAllSymbolViewsUncached(): Promise<ConstituentView[]> {
   const quoteDate = await latestQuoteDate();
   if (!quoteDate) return [];
 
@@ -629,3 +628,17 @@ export async function getMovers(
     mostActive: byValue,
   };
 }
+
+// Per-request memoisation (React cache): one page render calls these from
+// many components, but market data only changes when the daily ingest runs.
+// Outside a server render, cache() is a pass-through.
+export const latestQuoteDate = cache(latestQuoteDateUncached);
+const latestConstituentDateCached = cache(latestConstituentDateUncached);
+export const latestConstituentDate = (arg: Parameters<typeof latestConstituentDateUncached>[0] = TRACKED_INDEX) =>
+  latestConstituentDateCached(arg);
+export const getTrackedIndexCodes = cache(getTrackedIndexCodesUncached);
+const getConstituentsCached = cache(getConstituentsUncached);
+export const getConstituents = (arg: Parameters<typeof getConstituentsUncached>[0] = TRACKED_INDEX) =>
+  getConstituentsCached(arg);
+export const isDatabaseEmpty = cache(isDatabaseEmptyUncached);
+export const getAllSymbolViews = cache(getAllSymbolViewsUncached);

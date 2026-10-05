@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireUser } from "@/lib/auth";
 import { computeZakat, getZakatSettings } from "@/lib/zakat";
 import { isDatabaseEmpty, latestQuoteDate } from "@/lib/market";
 import { ZakatForm } from "@/components/ZakatForm";
@@ -18,6 +19,7 @@ import { money, pct, count, prettyDate } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function ZakatPage() {
+  const user = await requireUser("/zakat");
   if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No market data yet">
@@ -26,8 +28,8 @@ export default async function ZakatPage() {
     );
   }
 
-  const settings = getZakatSettings();
-  const result = await computeZakat(settings);
+  const settings = await getZakatSettings(user.id);
+  const result = await computeZakat(user.id, settings);
   const quoteDate = await latestQuoteDate();
 
   return (

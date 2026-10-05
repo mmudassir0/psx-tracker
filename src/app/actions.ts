@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { headers } from "next/headers";
+import { auth, getCurrentUser, getCurrentUserId } from "@/lib/auth";
 import {
   addTransaction,
   deleteTransaction,
@@ -20,8 +22,8 @@ import { runIngest } from "@/lib/psx/ingest";
 import { desc } from "drizzle-orm";
 import { db } from "@/db";
 import { ingestRuns, watchlist } from "@/db/schema";
-import { eq } from "drizzle-orm";
-import { setSetting } from "@/lib/settings";
+import { and, eq } from "drizzle-orm";
+import { setUserSetting } from "@/lib/settings";
 import { notifyAlerts } from "@/lib/notify";
 import {
   recordScreenHits,
@@ -34,6 +36,20 @@ import { getZakatSettings, ZAKAT_SETTINGS_KEY } from "@/lib/zakat";
 export interface ActionState {
   ok: boolean;
   message: string;
+}
+
+// Every write below resolves the user from the session itself and only ever
+// touches that user's rows: hiding a form does not stop a direct call.
+const NOT_LOGGED_IN: ActionState = {
+  ok: false,
+  message: "Log in to make changes.",
+};
+
+/** For plain form actions, which have no state to report an error into. */
+async function userIdOrThrow(): Promise<string> {
+  const userId = await getCurrentUserId();
+  if (!userId) throw new Error("Log in to make changes.");
+  return userId;
 }
 
 const transactionSchema = z.object({
@@ -55,6 +71,8 @@ export async function addTransactionAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
   const parsed = transactionSchema.safeParse({
     symbol: formData.get("symbol"),
     date: formData.get("date"),
@@ -73,7 +91,7 @@ export async function addTransactionAction(
   }
 
   const input = parsed.data;
-  await addTransaction({
+  await addTransaction(userId, {
     symbol: input.symbol,
     date: input.date,
     type: input.type as TransactionType,
@@ -92,8 +110,9 @@ export async function addTransactionAction(
 }
 
 export async function deleteTransactionAction(formData: FormData) {
+  const userId = await userIdOrThrow();
   const id = String(formData.get("id") ?? "");
-  if (id) await deleteTransaction(id);
+  if (id) await deleteTransaction(userId, id);
   revalidatePath("/portfolio");
   revalidatePath("/");
 }
@@ -126,6 +145,8 @@ export async function createAlertAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
   const parsed = alertSchema.safeParse({
     symbol: formData.get("symbol") || null,
     kind: formData.get("kind"),
@@ -151,35 +172,38 @@ export async function createAlertAction(
     return { ok: false, message: "This alert type needs a symbol" };
   }
 
-  await createAlert({
+  await createAlert(userId, {
     symbol,
     kind: kind as AlertKind,
     threshold: membershipRule ? null : threshold,
     note: note ?? null,
   });
 
-  await evaluateAlerts();
+  await evaluateAlerts(userId);
 
   revalidatePath("/alerts");
   return { ok: true, message: "Alert created" };
 }
 
 export async function deleteAlertAction(formData: FormData) {
+  const userId = await userIdOrThrow();
   const id = String(formData.get("id") ?? "");
-  if (id) await deleteAlert(id);
+  if (id) await deleteAlert(userId, id);
   revalidatePath("/alerts");
 }
 
 export async function toggleAlertAction(formData: FormData) {
+  const userId = await userIdOrThrow();
   const id = String(formData.get("id") ?? "");
   const active = formData.get("active") === "true";
-  if (id) await setAlertActive(id, active);
+  if (id) await setAlertActive(userId, id, active);
   revalidatePath("/alerts");
 }
 
 export async function acknowledgeEventAction(formData: FormData) {
+  const userId = await userIdOrThrow();
   const id = String(formData.get("id") ?? "");
-  if (id) await acknowledgeEvent(id);
+  if (id) await acknowledgeEvent(userId, id);
   revalidatePath("/alerts");
 }
 
@@ -196,6 +220,8 @@ export async function saveZakatSettingsAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
   const parsed = zakatSchema.safeParse({
     nisabBasis: formData.get("nisabBasis"),
     metalPricePerGram: formData.get("metalPricePerGram") || 0,
@@ -222,8 +248,8 @@ export async function saveZakatSettingsAction(
     }
   }
 
-  const current = getZakatSettings();
-  setSetting(ZAKAT_SETTINGS_KEY, {
+  const current = await getZakatSettings(userId);
+  await setUserSetting(userId, ZAKAT_SETTINGS_KEY, {
     ...current,
     ...parsed.data,
     zakatablePct,
@@ -290,6 +316,12 @@ export async function getIngestStatusAction(): Promise<IngestStatus> {
 export async function startIngestAction(
   scope: IngestScope = "full",
 ): Promise<ActionState> {
+  // Ingests hit PSX and rewrite shared market data: admins only.
+  const user = await getCurrentUser();
+  if (!user) return NOT_LOGGED_IN;
+  if (user.role !== "admin") {
+    return { ok: false, message: "Only an admin can refresh market data." };
+  }
   // PSX answers Vercel's IPs with HTTP 462, so a run started here can only
   // fail. The daily GitHub Actions workflow does the real updates.
   if (process.env.VERCEL) {
@@ -326,6 +358,7 @@ export async function startIngestAction(
     .then(async () => {
       try {
         await recordScreenHits();
+        // Every user's alerts, as the daily job does.
         notifyAlerts(await evaluateAlerts());
       } catch {
       }
@@ -345,6 +378,8 @@ export async function addToWatchlistAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
   const symbol = String(formData.get("symbol") ?? "").trim().toUpperCase();
   const note = String(formData.get("note") ?? "").trim() || null;
   if (!symbol) return { ok: false, message: "Symbol is required" };
@@ -357,12 +392,16 @@ export async function addToWatchlistAction(
 
   await db.insert(watchlist)
     .values({
+      userId,
       symbol,
       note,
       addedPrice: view.close ?? null,
       addedAt: new Date(),
     })
-    .onConflictDoUpdate({ target: watchlist.symbol, set: { note } })
+    .onConflictDoUpdate({
+      target: [watchlist.userId, watchlist.symbol],
+      set: { note },
+    })
     .run();
 
   revalidatePath("/watchlist");
@@ -370,8 +409,14 @@ export async function addToWatchlistAction(
 }
 
 export async function removeFromWatchlistAction(formData: FormData) {
+  const userId = await userIdOrThrow();
   const symbol = String(formData.get("symbol") ?? "");
-  if (symbol) await db.delete(watchlist).where(eq(watchlist.symbol, symbol)).run();
+  if (symbol) {
+    await db
+      .delete(watchlist)
+      .where(and(eq(watchlist.userId, userId), eq(watchlist.symbol, symbol)))
+      .run();
+  }
   revalidatePath("/watchlist");
 }
 
@@ -420,6 +465,8 @@ export async function saveScreenAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
   const parsed = parseScreenForm(formData);
   if (!parsed.success) {
     return {
@@ -430,20 +477,27 @@ export async function saveScreenAction(
 
   const existingId = String(formData.get("id") ?? "").trim();
   if (existingId) {
-    await updateCustomScreen(existingId, parsed.data);
+    await updateCustomScreen(userId, existingId, parsed.data);
     revalidatePath("/screens");
     revalidatePath(`/screens/${existingId}`);
     return { ok: true, message: "Screen updated" };
   }
 
-  const id = await createCustomScreen(parsed.data);
+  const id = await createCustomScreen(userId, parsed.data);
   revalidatePath("/screens");
   redirect(`/screens/${id}`);
 }
 
 export async function deleteScreenAction(formData: FormData) {
+  const userId = await userIdOrThrow();
   const id = String(formData.get("id") ?? "");
-  if (id) await deleteCustomScreen(id);
+  if (id) await deleteCustomScreen(userId, id);
   revalidatePath("/screens");
   redirect("/screens");
+}
+
+export async function logoutAction() {
+  await auth.api.signOut({ headers: await headers() });
+  revalidatePath("/", "layout");
+  redirect("/");
 }

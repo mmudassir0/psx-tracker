@@ -1,3 +1,4 @@
+import { getCurrentUserId } from "@/lib/auth";
 import Link from "next/link";
 import { runAllScreens, describeRule } from "@/lib/screens";
 import { isDatabaseEmpty, latestQuoteDate } from "@/lib/market";
@@ -22,7 +23,7 @@ export default async function ScreensPage() {
     );
   }
 
-  const results = await runAllScreens();
+  const results = await runAllScreens(await getCurrentUserId());
   const quoteDate = await latestQuoteDate();
 
   const totalNew = results.reduce((sum, r) => sum + r.newSymbols.length, 0);

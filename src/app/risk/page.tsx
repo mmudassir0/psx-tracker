@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireUser } from "@/lib/auth";
 import { buildRiskReport, MIN_OVERLAP } from "@/lib/risk";
 import { isDatabaseEmpty } from "@/lib/market";
 import { getPortfolio } from "@/lib/portfolio";
@@ -10,7 +11,6 @@ import {
   StatTile,
   PageHeader,
   EmptyState,
-  Badge,
   SymbolLink,
   TableWrap,
   Th,
@@ -31,6 +31,7 @@ export default async function RiskPage({
 }: {
   searchParams: Promise<{ window?: string }>;
 }) {
+  const user = await requireUser("/risk");
   if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
@@ -45,7 +46,7 @@ export default async function RiskPage({
     : "365";
   const days = WINDOWS.find((w) => w.key === windowKey)!.days;
 
-  const portfolio = await getPortfolio();
+  const portfolio = await getPortfolio(user.id);
   const open = portfolio.holdings.filter((h) => h.quantity > 0);
 
   if (open.length === 0) {
@@ -65,7 +66,7 @@ export default async function RiskPage({
     );
   }
 
-  const report = await buildRiskReport({ days });
+  const report = await buildRiskReport({ userId: user.id, days });
 
   // Herfindahl: 1/n is perfectly even, 1 is everything in one name.
   const evenHhi = open.length > 0 ? 1 / open.length : 0;

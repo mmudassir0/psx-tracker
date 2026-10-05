@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { symbols } from "@/db/schema";
 import { getConstituents, type ConstituentView } from "@/lib/market";

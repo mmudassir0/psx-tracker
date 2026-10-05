@@ -1,3 +1,4 @@
+import { getCurrentUserId } from "@/lib/auth";
 import Link from "next/link";
 import { runBacktest, planRebalance, type Weighting, type RebalanceFrequency } from "@/lib/backtest";
 import { getTrackedIndexCodes, isDatabaseEmpty } from "@/lib/market";
@@ -88,7 +89,12 @@ export default async function StrategyPage({
     rebalance,
   });
 
-  const plan = await planRebalance({ indexCode, weighting, tolerancePct: tolerance });
+  const plan = await planRebalance({
+    userId: await getCurrentUserId(),
+    indexCode,
+    weighting,
+    tolerancePct: tolerance,
+  });
   const tradeRows = plan.rows.filter((r) => r.action !== "hold");
 
   const base = (overrides: Record<string, string>) => {

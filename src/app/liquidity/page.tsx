@@ -1,3 +1,4 @@
+import { getCurrentUserId } from "@/lib/auth";
 import {
   buildLiquidityReport,
   TIER_LABELS,
@@ -41,9 +42,11 @@ export default async function LiquidityPage({
     sp.index && available.includes(sp.index.toUpperCase())
       ? sp.index.toUpperCase()
       : DEFAULT_INDEX;
-  const heldOnly = sp.held === "1";
+  const userId = await getCurrentUserId();
+  const unlocked = userId != null;
+  const heldOnly = unlocked && sp.held === "1";
 
-  const report = await buildLiquidityReport({ indexCode, heldOnly });
+  const report = await buildLiquidityReport({ userId, indexCode, heldOnly });
 
   const link = (o: Record<string, string>) => {
     const p = new URLSearchParams({
@@ -80,14 +83,16 @@ export default async function LiquidityPage({
             </Chip>
           ))}
         </ChipRow>
-        <ChipRow label="Scope">
-          <Chip href={`/liquidity?index=${indexCode}`} active={!heldOnly}>
-            All constituents
-          </Chip>
-          <Chip href={link({ held: "1" })} active={heldOnly}>
-            My holdings
-          </Chip>
-        </ChipRow>
+        {unlocked && (
+          <ChipRow label="Scope">
+            <Chip href={`/liquidity?index=${indexCode}`} active={!heldOnly}>
+              All constituents
+            </Chip>
+            <Chip href={link({ held: "1" })} active={heldOnly}>
+              My holdings
+            </Chip>
+          </ChipRow>
+        )}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

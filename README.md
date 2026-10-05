@@ -88,6 +88,67 @@ npm run dev
 
 Then open http://localhost:3000.
 
+## Accounts
+
+Anyone can sign up (`/signup`) with an email and password, or with Google if
+it is configured. Each account has its own portfolio, transactions, watchlist,
+alerts, custom screens and zakat settings; nobody can see anyone else's.
+Market data is shared and public. Visitors who aren't logged in see the
+market pages with no holdings.
+
+Built on [Better Auth](https://better-auth.com) (`src/lib/auth.ts`):
+
+- Passwords are hashed (scrypt), never stored readable. Minimum 10 characters.
+- Sessions last 30 days, in an HTTP-only cookie backed by the `session` table.
+- Login, sign-up and password changes are rate limited per IP (5 a minute for
+  login; 5 an hour for sign-up), counted in the database so the limit holds
+  across serverless instances.
+- Emails are **not verified** (there is no email service). Treat them as
+  usernames. For the same reason a Google login is never merged into an
+  existing email account.
+- Every personal query takes the owner's id and filters by it; pages and
+  actions get that id from the session. `npm run test:accounts` checks that
+  one user can't read or change another's data, even by guessing ids.
+
+### Environment variables
+
+| Variable | Needed | Value |
+|---|---|---|
+| `AUTH_SECRET` | Yes | Long random string: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Changing it logs everyone out. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | For Google login | From a Google Cloud OAuth client (below). Without them the Google button is hidden. |
+| `BETTER_AUTH_URL` | No | Public URL of the site. On Vercel the production domain is used automatically. |
+
+### First-time setup on an existing database
+
+```bash
+npm run migrate:accounts
+```
+
+Creates the account tables and adds an owner to every personal table. Safe to
+run again; it only adds what is missing. Then sign up on the site and run:
+
+```bash
+npm run make-admin -- you@example.com
+```
+
+That account becomes the admin and receives all data from before accounts
+existed. It is a command rather than "first sign-up wins" because sign-up is
+open: a stranger could otherwise register first and take both.
+
+### Admin
+
+`/admin` (admins only) lists every account. From there you can set a
+temporary password for someone who forgot theirs (they are logged out
+everywhere and should change it on `/account`), or disable an account.
+
+### Google login
+
+1. Google Cloud Console → APIs & Services → Credentials → Create credentials →
+   OAuth client ID → Web application.
+2. Authorised redirect URI: `https://<your-domain>/api/auth/callback/google`
+   (and `http://localhost:3000/api/auth/callback/google` for local use).
+3. Put the client ID and secret in `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+
 ## Daily updates
 
 `.github/workflows/ingest.yml` runs `npm run ingest` at 11:00 UTC (16:00 PKT),
@@ -114,7 +175,10 @@ after an hour is shown as interrupted.
 | `npm run ingest -- --indices=KMI30` | Fundamentals for one index only |
 | `npm run ingest -- --recheck-pages` | Retry symbols marked as having no company page |
 | `npm run verify` | Smoke-test the PSX parsers against live pages |
-| `npm test` | Portfolio math, recomposition, backtest, zakat, parsers, links |
+| `npm test` | Portfolio math, recomposition, backtest, zakat, parsers, account isolation, links |
+| `npm run migrate:accounts` | Add the account tables to an existing database |
+| `npm run make-admin -- <email>` | Make an account the admin and give it pre-account data |
+| `npm run seed:demo -- <email>` | Add demo transactions to an account (`seed:clear` removes them) |
 | `npm run db:studio` | Browse the database |
 
 `npm test` always runs against scratch SQLite files under `.scratch/`, even

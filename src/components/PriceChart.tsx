@@ -12,7 +12,7 @@ import {
   YAxis,
 } from "recharts";
 import { money, prettyDate } from "@/lib/format";
-import { weekdaysBetween } from "@/lib/dates";
+import { addDays, weekdaysBetween } from "@/lib/dates";
 
 /**
  * Missing weekday sessions in a row before a gap is shaded. Eid closures run
@@ -53,9 +53,11 @@ export function PriceChart({
   const filtered = useMemo(() => {
     const range = RANGES.find((r) => r.key === rangeKey) ?? RANGES[3];
     if (range.days === Number.MAX_SAFE_INTEGER) return data;
-    const cutoff = new Date(Date.now() - range.days * 86_400_000)
-      .toISOString()
-      .slice(0, 10);
+    // Count back from the newest point, not today, so a weekend or a stale
+    // day doesn't shave sessions off the window.
+    const newest = data[data.length - 1]?.date;
+    if (!newest) return data;
+    const cutoff = addDays(newest, -range.days);
     const sliced = data.filter((d) => d.date >= cutoff);
     // Never render an empty plot just because the window outruns the history.
     return sliced.length >= 2 ? sliced : data;

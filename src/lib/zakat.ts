@@ -1,5 +1,5 @@
 import { getPortfolio, type HoldingView } from "@/lib/portfolio";
-import { getSetting } from "@/lib/settings";
+import { getUserSetting } from "@/lib/settings";
 
 /**
  * Zakat calculator for a shareholding portfolio.
@@ -57,8 +57,14 @@ export const DEFAULT_ZAKAT_SETTINGS: ZakatSettings = {
   defaultZakatablePct: 100,
 };
 
-export function getZakatSettings(): ZakatSettings {
-  return getSetting<ZakatSettings>(ZAKAT_SETTINGS_KEY, DEFAULT_ZAKAT_SETTINGS);
+export async function getZakatSettings(
+  userId: string | null,
+): Promise<ZakatSettings> {
+  return getUserSetting<ZakatSettings>(
+    userId,
+    ZAKAT_SETTINGS_KEY,
+    DEFAULT_ZAKAT_SETTINGS,
+  );
 }
 
 export interface ZakatLine {
@@ -91,8 +97,11 @@ export interface ZakatResult {
   dividendIncome: number;
 }
 
-export async function computeZakat(settings: ZakatSettings): Promise<ZakatResult> {
-  const portfolio = await getPortfolio();
+export async function computeZakat(
+  userId: string | null,
+  settings: ZakatSettings,
+): Promise<ZakatResult> {
+  const portfolio = await getPortfolio(userId);
   const open = portfolio.holdings.filter((h) => h.quantity > 0);
 
   const lines: ZakatLine[] = open.map((h: HoldingView) => {

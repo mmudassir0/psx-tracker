@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { payouts } from "@/db/schema";
@@ -66,7 +67,7 @@ export async function getDividendYield(
 }
 
 /** Trailing dividend per share for many symbols in one query. */
-export async function getTrailingDividendMap(
+async function getTrailingDividendMapUncached(
   asOf: string = todayPkt(),
 ): Promise<Map<string, number>> {
   const since = addDays(asOf, -365);
@@ -122,3 +123,10 @@ export async function getUpcomingBookClosures(
       ),
     }));
 }
+
+// Per-request memoisation (React cache): one page render calls these from
+// many components, but market data only changes when the daily ingest runs.
+// Outside a server render, cache() is a pass-through.
+const getTrailingDividendMapCached = cache(getTrailingDividendMapUncached);
+export const getTrailingDividendMap = (arg: Parameters<typeof getTrailingDividendMapUncached>[0] = todayPkt()) =>
+  getTrailingDividendMapCached(arg);

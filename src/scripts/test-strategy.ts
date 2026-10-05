@@ -1,11 +1,13 @@
 import { db } from "@/db";
-import { transactions, quotesDaily, symbols, constituents, companyStats } from "@/db/schema";
+import { quotesDaily, symbols, constituents, companyStats } from "@/db/schema";
 import { computeMetrics } from "@/lib/backtest";
 import { computeZakat, DEFAULT_ZAKAT_SETTINGS } from "@/lib/zakat";
 import { addTransaction } from "@/lib/portfolio";
 import { assertScratchDatabase } from "./test-guard";
 
 console.log(`Using scratch database: ${assertScratchDatabase()}`);
+
+const USER = "test-user";
 
 let failures = 0;
 
@@ -53,7 +55,7 @@ async function runStrategyTests() {
   db.$client.exec(`
     DROP TABLE IF EXISTS transactions;
     CREATE TABLE transactions (
-      id text PRIMARY KEY, symbol text NOT NULL, date text NOT NULL, type text NOT NULL,
+      id text PRIMARY KEY, user_id text, symbol text NOT NULL, date text NOT NULL, type text NOT NULL,
       quantity real NOT NULL DEFAULT 0, price real NOT NULL DEFAULT 0,
       fees real NOT NULL DEFAULT 0, note text, created_at integer NOT NULL);
     DROP TABLE IF EXISTS quotes_daily;
@@ -99,11 +101,11 @@ async function runStrategyTests() {
     .values({ symbol: "AAA", date: DATE, freeFloatShares: 1000 })
     .run();
 
-  await addTransaction({ symbol: "AAA", date: "2026-01-01", type: "buy", quantity: 1000, price: 400 });
+  await addTransaction(USER, { symbol: "AAA", date: "2026-01-01", type: "buy", quantity: 1000, price: 400 });
 
   console.log("\n[5] Zakat at 100% zakatable, above nisab");
   {
-    const r = await computeZakat({
+    const r = await computeZakat(USER, {
       ...DEFAULT_ZAKAT_SETTINGS,
       metalPricePerGram: 100,
       nisabBasis: "silver",
@@ -116,7 +118,7 @@ async function runStrategyTests() {
 
   console.log("\n[6] Partial zakatable share and liabilities both apply");
   {
-    const r = await computeZakat({
+    const r = await computeZakat(USER, {
       ...DEFAULT_ZAKAT_SETTINGS,
       metalPricePerGram: 100,
       defaultZakatablePct: 40,
@@ -130,7 +132,7 @@ async function runStrategyTests() {
 
   console.log("\n[7] Below nisab means nothing is due");
   {
-    const r = await computeZakat({
+    const r = await computeZakat(USER, {
       ...DEFAULT_ZAKAT_SETTINGS,
       metalPricePerGram: 10_000,
       nisabBasis: "gold",
@@ -145,7 +147,7 @@ async function runStrategyTests() {
 
   console.log("\n[8] No metal price means the nisab test is unknown, not 'no'");
   {
-    const r = await computeZakat({ ...DEFAULT_ZAKAT_SETTINGS, metalPricePerGram: 0 });
+    const r = await computeZakat(USER, { ...DEFAULT_ZAKAT_SETTINGS, metalPricePerGram: 0 });
     console.log(
       `${r.aboveNisab === null ? "  PASS" : "  FAIL"}  aboveNisab is null`,
     );
@@ -155,7 +157,7 @@ async function runStrategyTests() {
 
   console.log("\n[9] Solar year uses the higher rate");
   {
-    const r = await computeZakat({
+    const r = await computeZakat(USER, {
       ...DEFAULT_ZAKAT_SETTINGS,
       metalPricePerGram: 100,
       year: "solar",

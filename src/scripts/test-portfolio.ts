@@ -9,6 +9,7 @@ db.$client.exec(`
   DROP TABLE IF EXISTS transactions;
   CREATE TABLE transactions (
     id text PRIMARY KEY,
+    user_id text,
     symbol text NOT NULL,
     date text NOT NULL,
     type text NOT NULL,
@@ -19,6 +20,9 @@ db.$client.exec(`
     created_at integer NOT NULL
   );
 `);
+
+/** Every row in this test belongs to one user. */
+const USER = "test-user";
 
 let failures = 0;
 
@@ -38,10 +42,10 @@ async function runTests() {
   // --- 1. Weighted average across two buys, fees included in basis ---------
   console.log("\n[1] Two buys with fees -> weighted average cost");
   reset();
-  await addTransaction({ symbol: "T", date: "2026-01-01", type: "buy", quantity: 100, price: 100, fees: 50 });
-  await addTransaction({ symbol: "T", date: "2026-02-01", type: "buy", quantity: 100, price: 200, fees: 50 });
+  await addTransaction(USER, { symbol: "T", date: "2026-01-01", type: "buy", quantity: 100, price: 100, fees: 50 });
+  await addTransaction(USER, { symbol: "T", date: "2026-02-01", type: "buy", quantity: 100, price: 200, fees: 50 });
   {
-    const holdings = await getHoldings();
+    const holdings = await getHoldings(USER);
     const h = holdings[0];
     check("quantity", h.quantity, 200);
     check("avgCost", h.avgCost, 150.5);
@@ -51,10 +55,10 @@ async function runTests() {
   // --- 2. Sell realises P&L against the average, basis unchanged ----------
   console.log("\n[2] Partial sell -> realised P&L, avg cost unchanged");
   reset();
-  await addTransaction({ symbol: "T", date: "2026-01-01", type: "buy", quantity: 100, price: 100, fees: 0 });
-  await addTransaction({ symbol: "T", date: "2026-03-01", type: "sell", quantity: 40, price: 150, fees: 100 });
+  await addTransaction(USER, { symbol: "T", date: "2026-01-01", type: "buy", quantity: 100, price: 100, fees: 0 });
+  await addTransaction(USER, { symbol: "T", date: "2026-03-01", type: "sell", quantity: 40, price: 150, fees: 100 });
   {
-    const holdings = await getHoldings();
+    const holdings = await getHoldings(USER);
     const h = holdings[0];
     check("remaining quantity", h.quantity, 60);
     check("avgCost unchanged", h.avgCost, 100);
@@ -64,10 +68,10 @@ async function runTests() {
   // --- 3. Bonus shares dilute the average, total cost constant -------------
   console.log("\n[3] Bonus issue -> average diluted, total cost constant");
   reset();
-  await addTransaction({ symbol: "T", date: "2026-01-01", type: "buy", quantity: 100, price: 300, fees: 0 });
-  await addTransaction({ symbol: "T", date: "2026-04-01", type: "bonus", quantity: 50, price: 0, fees: 0 });
+  await addTransaction(USER, { symbol: "T", date: "2026-01-01", type: "buy", quantity: 100, price: 300, fees: 0 });
+  await addTransaction(USER, { symbol: "T", date: "2026-04-01", type: "bonus", quantity: 50, price: 0, fees: 0 });
   {
-    const holdings = await getHoldings();
+    const holdings = await getHoldings(USER);
     const h = holdings[0];
     check("quantity", h.quantity, 150);
     check("avgCost", h.avgCost, 200);
@@ -77,10 +81,10 @@ async function runTests() {
   // --- 4. Dividend is income only, never touches basis ---------------------
   console.log("\n[4] Dividend -> income only, basis untouched");
   reset();
-  await addTransaction({ symbol: "T", date: "2026-01-01", type: "buy", quantity: 100, price: 100, fees: 0 });
-  await addTransaction({ symbol: "T", date: "2026-05-01", type: "dividend", quantity: 100, price: 5, fees: 75 });
+  await addTransaction(USER, { symbol: "T", date: "2026-01-01", type: "buy", quantity: 100, price: 100, fees: 0 });
+  await addTransaction(USER, { symbol: "T", date: "2026-05-01", type: "dividend", quantity: 100, price: 5, fees: 75 });
   {
-    const holdings = await getHoldings();
+    const holdings = await getHoldings(USER);
     const h = holdings[0];
     check("dividendIncome", h.dividendIncome, 425);
     check("avgCost untouched", h.avgCost, 100);
@@ -90,10 +94,10 @@ async function runTests() {
   // --- 5. Rights issue adds shares at subscription price -------------------
   console.log("\n[5] Rights issue -> shares added at subscription price");
   reset();
-  await addTransaction({ symbol: "T", date: "2026-01-01", type: "buy", quantity: 100, price: 200, fees: 0 });
-  await addTransaction({ symbol: "T", date: "2026-06-01", type: "rights", quantity: 50, price: 50, fees: 0 });
+  await addTransaction(USER, { symbol: "T", date: "2026-01-01", type: "buy", quantity: 100, price: 200, fees: 0 });
+  await addTransaction(USER, { symbol: "T", date: "2026-06-01", type: "rights", quantity: 50, price: 50, fees: 0 });
   {
-    const holdings = await getHoldings();
+    const holdings = await getHoldings(USER);
     const h = holdings[0];
     check("quantity", h.quantity, 150);
     check("avgCost", h.avgCost, 150);
@@ -102,10 +106,10 @@ async function runTests() {
   // --- 6. Full exit zeroes the position but keeps realised P&L ------------
   console.log("\n[6] Full exit -> flat position, realised P&L retained");
   reset();
-  await addTransaction({ symbol: "T", date: "2026-01-01", type: "buy", quantity: 100, price: 100, fees: 0 });
-  await addTransaction({ symbol: "T", date: "2026-07-01", type: "sell", quantity: 100, price: 120, fees: 0 });
+  await addTransaction(USER, { symbol: "T", date: "2026-01-01", type: "buy", quantity: 100, price: 100, fees: 0 });
+  await addTransaction(USER, { symbol: "T", date: "2026-07-01", type: "sell", quantity: 100, price: 120, fees: 0 });
   {
-    const holdings = await getHoldings();
+    const holdings = await getHoldings(USER);
     const h = holdings[0];
     check("quantity", h.quantity, 0);
     check("avgCost reset", h.avgCost, 0);
@@ -115,10 +119,10 @@ async function runTests() {
   // --- 7. Overselling is clamped to the held quantity ---------------------
   console.log("\n[7] Sell more than held -> clamped, no negative position");
   reset();
-  await addTransaction({ symbol: "T", date: "2026-01-01", type: "buy", quantity: 50, price: 100, fees: 0 });
-  await addTransaction({ symbol: "T", date: "2026-07-01", type: "sell", quantity: 500, price: 110, fees: 0 });
+  await addTransaction(USER, { symbol: "T", date: "2026-01-01", type: "buy", quantity: 50, price: 100, fees: 0 });
+  await addTransaction(USER, { symbol: "T", date: "2026-07-01", type: "sell", quantity: 500, price: 110, fees: 0 });
   {
-    const holdings = await getHoldings();
+    const holdings = await getHoldings(USER);
     const h = holdings[0];
     check("quantity floored at zero", h.quantity, 0);
     check("realised on 50 only", h.realizedPnl, 500);

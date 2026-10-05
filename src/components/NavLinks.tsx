@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { logoutAction } from "@/app/actions";
 
 /**
  * Grouped navigation.
@@ -92,22 +93,33 @@ const GROUPS: NavGroup[] = [
   },
 ];
 
-export function NavLinks({ unreadAlerts = 0 }: { unreadAlerts?: number }) {
+export function NavLinks({
+  unreadAlerts = 0,
+  user,
+}: {
+  unreadAlerts?: number;
+  /** The logged-in user, or null for visitors. */
+  user: { name: string; isAdmin: boolean } | null;
+}) {
   const pathname = usePathname();
-  const [open, setOpen] = useState<string | null>(null);
+  // Remember which page a menu was opened on: navigating away closes it
+  // without an effect, so a menu never lingers over the new page.
+  const [openOn, setOpenOn] = useState<{ label: string; path: string } | null>(
+    null,
+  );
+  const open = openOn?.path === pathname ? openOn.label : null;
+  const setOpen = (label: string | null) =>
+    setOpenOn(label ? { label, path: pathname } : null);
   const navRef = useRef<HTMLElement>(null);
-
-  // Close on route change, so a menu never lingers over the new page.
-  useEffect(() => setOpen(null), [pathname]);
 
   useEffect(() => {
     if (!open) return;
 
     function onPointerDown(event: MouseEvent) {
-      if (!navRef.current?.contains(event.target as Node)) setOpen(null);
+      if (!navRef.current?.contains(event.target as Node)) setOpenOn(null);
     }
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(null);
+      if (event.key === "Escape") setOpenOn(null);
     }
 
     document.addEventListener("mousedown", onPointerDown);
@@ -204,6 +216,40 @@ export function NavLinks({ unreadAlerts = 0 }: { unreadAlerts?: number }) {
       >
         Health
       </Link>
+
+      {user ? (
+        <>
+          {user.isAdmin && (
+            <Link href="/admin" className={linkClass(pathname.startsWith("/admin"))}>
+              Admin
+            </Link>
+          )}
+          <Link
+            href="/account"
+            className={linkClass(pathname.startsWith("/account"))}
+            title="Your account"
+          >
+            {user.name}
+          </Link>
+          <form action={logoutAction}>
+            <button type="submit" className={`${linkClass(false)} opacity-70`}>
+              Log out
+            </button>
+          </form>
+        </>
+      ) : (
+        <>
+          <Link
+            href={`/login?next=${encodeURIComponent(pathname)}`}
+            className={linkClass(pathname === "/login")}
+          >
+            Log in
+          </Link>
+          <Link href="/signup" className={linkClass(pathname === "/signup")}>
+            Sign up
+          </Link>
+        </>
+      )}
     </nav>
   );
 }

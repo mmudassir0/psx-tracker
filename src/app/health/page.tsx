@@ -117,16 +117,19 @@ export default async function HealthPage() {
 
   const trackedCodes = await getTrackedIndexCodes();
   const indexCodes = sortIndexCodes(trackedCodes);
-  const snapshotCounts = await Promise.all(
-    indexCodes.map(async (code) => {
-      const row = await db
-        .select({ dates: sql<number>`count(distinct ${constituents.date})` })
-        .from(constituents)
-        .where(sql`${constituents.indexCode} = ${code}`)
-        .get();
-      return { code, snapshots: row?.dates ?? 0 };
-    }),
-  );
+  const snapshotRows = await db
+    .select({
+      code: constituents.indexCode,
+      dates: sql<number>`count(distinct ${constituents.date})`,
+    })
+    .from(constituents)
+    .groupBy(constituents.indexCode)
+    .all();
+  const datesByCode = new Map(snapshotRows.map((r) => [r.code, r.dates]));
+  const snapshotCounts = indexCodes.map((code) => ({
+    code,
+    snapshots: datesByCode.get(code) ?? 0,
+  }));
 
   const lastIngest = await getLastIngest();
   const runs = await db

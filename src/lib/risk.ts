@@ -167,11 +167,12 @@ export interface RiskReport {
 }
 
 export async function buildRiskReport({
+  userId,
   indexCode = TRACKED_INDEX,
   days = 365,
-}: { indexCode?: string; days?: number } = {}): Promise<RiskReport> {
+}: { userId: string | null; indexCode?: string; days?: number }): Promise<RiskReport> {
   const fromDate = addDays(todayPkt(), -days);
-  const portfolio = await getPortfolio();
+  const portfolio = await getPortfolio(userId);
   const open = portfolio.holdings.filter((h) => h.quantity > 0);
   const wanted = open.map((h) => h.symbol);
 

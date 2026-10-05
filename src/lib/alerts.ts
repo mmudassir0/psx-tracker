@@ -26,17 +26,38 @@ export interface FiredAlert {
  *
  * An alert fires at most once per calendar day, so re-running the ingest
  * doesn't spam the log.
+ *
+ * With a userId, only that user's rules run (after they create one). Without,
+ * every user's rules run: that is the daily ingest.
  */
-export async function evaluateAlerts(): Promise<FiredAlert[]> {
+export async function evaluateAlerts(userId?: string): Promise<FiredAlert[]> {
   const date = (await latestQuoteDate()) ?? todayPkt();
-  const rules = await db.select().from(alerts).where(eq(alerts.active, true)).all();
+  const rules = await db
+    .select()
+    .from(alerts)
+    .where(
+      userId
+        ? and(eq(alerts.active, true), eq(alerts.userId, userId))
+        : eq(alerts.active, true),
+    )
+    .all();
   if (rules.length === 0) return [];
 
   const constituents = await getConstituents();
   const bySymbol = new Map(constituents.map((c) => [c.symbol, c]));
   const recomposition = await detectRecomposition();
-  const holdings = await getHoldings();
-  const heldSymbols = new Set(holdings.map((h) => h.symbol));
+
+  // Portfolio-wide rules watch the rule owner's own holdings.
+  const heldByUser = new Map<string, Set<string>>();
+  async function heldSymbolsOf(owner: string | null): Promise<Set<string>> {
+    if (!owner) return new Set();
+    let held = heldByUser.get(owner);
+    if (!held) {
+      held = new Set((await getHoldings(owner)).map((h) => h.symbol));
+      heldByUser.set(owner, held);
+    }
+    return held;
+  }
 
   const fired: FiredAlert[] = [];
 
@@ -52,6 +73,7 @@ export async function evaluateAlerts(): Promise<FiredAlert[]> {
           ? recomposition.dropped
           : recomposition.added;
 
+      const heldSymbols = await heldSymbolsOf(rule.userId);
       const relevant = rule.symbol
         ? moved.filter((s) => s === rule.symbol)
         : moved.filter((s) => heldSymbols.has(s));
@@ -106,6 +128,7 @@ export async function evaluateAlerts(): Promise<FiredAlert[]> {
       await db.insert(alertEvents)
         .values({
           id: eventId,
+          userId: rule.userId,
           alertId: rule.id,
           date,
           symbol: rule.symbol,
@@ -141,17 +164,28 @@ function fmt(value: number): string {
   return value.toLocaleString("en-PK", { maximumFractionDigits: 2 });
 }
 
-export async function listAlerts() {
-  return await db.select().from(alerts).orderBy(desc(alerts.createdAt)).all();
+export async function listAlerts(userId: string | null) {
+  if (!userId) return [];
+  return await db
+    .select()
+    .from(alerts)
+    .where(eq(alerts.userId, userId))
+    .orderBy(desc(alerts.createdAt))
+    .all();
 }
 
 /** Unread alert count, for the nav badge. */
-export async function countUnacknowledgedEvents(): Promise<number> {
+export async function countUnacknowledgedEvents(
+  userId: string | null,
+): Promise<number> {
+  if (!userId) return 0;
   try {
     const rows = await db
       .select({ id: alertEvents.id })
       .from(alertEvents)
-      .where(eq(alertEvents.acknowledged, false))
+      .where(
+        and(eq(alertEvents.userId, userId), eq(alertEvents.acknowledged, false)),
+      )
       .all();
     return rows.length;
   } catch {
@@ -159,16 +193,18 @@ export async function countUnacknowledgedEvents(): Promise<number> {
   }
 }
 
-export async function listAlertEvents(limit = 100) {
+export async function listAlertEvents(userId: string | null, limit = 100) {
+  if (!userId) return [];
   return await db
     .select()
     .from(alertEvents)
+    .where(eq(alertEvents.userId, userId))
     .orderBy(desc(alertEvents.createdAt))
     .limit(limit)
     .all();
 }
 
-export async function createAlert(input: {
+export async function createAlert(userId: string, input: {
   symbol: string | null;
   kind: AlertKind;
   threshold: number | null;
@@ -178,6 +214,7 @@ export async function createAlert(input: {
   await db.insert(alerts)
     .values({
       id,
+      userId,
       symbol: input.symbol,
       kind: input.kind,
       threshold: input.threshold,
@@ -189,18 +226,29 @@ export async function createAlert(input: {
   return id;
 }
 
-export async function deleteAlert(id: string) {
+export async function deleteAlert(userId: string, id: string) {
+  // Owner check first, so events of someone else's alert are never touched.
+  const owned = await db
+    .select({ id: alerts.id })
+    .from(alerts)
+    .where(and(eq(alerts.id, id), eq(alerts.userId, userId)))
+    .get();
+  if (!owned) return;
   await db.delete(alertEvents).where(eq(alertEvents.alertId, id)).run();
   await db.delete(alerts).where(eq(alerts.id, id)).run();
 }
 
-export async function setAlertActive(id: string, active: boolean) {
-  await db.update(alerts).set({ active }).where(eq(alerts.id, id)).run();
+export async function setAlertActive(userId: string, id: string, active: boolean) {
+  await db
+    .update(alerts)
+    .set({ active })
+    .where(and(eq(alerts.id, id), eq(alerts.userId, userId)))
+    .run();
 }
 
-export async function acknowledgeEvent(id: string) {
+export async function acknowledgeEvent(userId: string, id: string) {
   await db.update(alertEvents)
     .set({ acknowledged: true })
-    .where(eq(alertEvents.id, id))
+    .where(and(eq(alertEvents.id, id), eq(alertEvents.userId, userId)))
     .run();
 }

@@ -301,17 +301,19 @@ export interface RebalancePlan {
 }
 
 export async function planRebalance({
+  userId,
   indexCode = TRACKED_INDEX,
   weighting = "index",
   tolerancePct = 0.5,
   includeMissing = false,
 }: {
+  userId: string | null;
   indexCode?: string;
   weighting?: Weighting;
   tolerancePct?: number;
   includeMissing?: boolean;
-} = {}): Promise<RebalancePlan> {
-  const portfolio = await getPortfolio();
+}): Promise<RebalancePlan> {
+  const portfolio = await getPortfolio(userId);
   const constituents = await getConstituents(indexCode);
   const held = portfolio.holdings.filter((h) => h.quantity > 0);
   const portfolioValue = held.reduce((sum, h) => sum + (h.marketValue ?? 0), 0);

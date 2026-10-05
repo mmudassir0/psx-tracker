@@ -7,7 +7,6 @@ import {
   latestQuoteDate,
   type ConstituentView,
 } from "@/lib/market";
-import { SHARIAH_INDEX_CODES } from "@/lib/psx/indices";
 
 export * from "@/lib/screen-types";
 
@@ -162,10 +161,18 @@ export function evaluateScreen(
   );
 }
 
-export async function listCustomScreens(): Promise<ScreenDefinition[]> {
+/**
+ * Custom screens belong to one user. `null` (logged out) gets none; "all"
+ * is for the daily ingest, which records hits for every user's screens.
+ */
+export async function listCustomScreens(
+  userId: string | null | "all",
+): Promise<ScreenDefinition[]> {
+  if (!userId) return [];
   const rows = await db
     .select()
     .from(customScreens)
+    .where(userId === "all" ? undefined : eq(customScreens.userId, userId))
     .orderBy(desc(customScreens.createdAt))
     .all();
 
@@ -188,7 +195,7 @@ function safeParseRules(raw: string): ScreenRule[] {
   }
 }
 
-export async function createCustomScreen(input: {
+export async function createCustomScreen(userId: string, input: {
   name: string;
   description?: string;
   rules: ScreenRule[];
@@ -198,6 +205,7 @@ export async function createCustomScreen(input: {
   await db.insert(customScreens)
     .values({
       id,
+      userId,
       name: input.name,
       description: input.description ?? null,
       rules: JSON.stringify(input.rules),
@@ -208,18 +216,34 @@ export async function createCustomScreen(input: {
   return id;
 }
 
-export async function deleteCustomScreen(id: string) {
+async function ownsScreen(userId: string, id: string): Promise<boolean> {
+  const row = await db
+    .select({ id: customScreens.id })
+    .from(customScreens)
+    .where(and(eq(customScreens.id, id), eq(customScreens.userId, userId)))
+    .get();
+  return Boolean(row);
+}
+
+export async function deleteCustomScreen(userId: string, id: string) {
+  if (!(await ownsScreen(userId, id))) return;
   await db.delete(customScreens).where(eq(customScreens.id, id)).run();
   await db.delete(screenHits).where(eq(screenHits.screenId, id)).run();
 }
 
-export async function getAllScreens(): Promise<ScreenDefinition[]> {
-  const custom = await listCustomScreens();
+/** Built-in screens plus this user's own (or every user's, for the ingest). */
+export async function getAllScreens(
+  userId: string | null | "all",
+): Promise<ScreenDefinition[]> {
+  const custom = await listCustomScreens(userId);
   return [...BUILT_IN_SCREENS, ...custom];
 }
 
-export async function getScreen(id: string): Promise<ScreenDefinition | null> {
-  const all = await getAllScreens();
+export async function getScreen(
+  userId: string | null,
+  id: string,
+): Promise<ScreenDefinition | null> {
+  const all = await getAllScreens(userId);
   return all.find((s) => s.id === id) ?? null;
 }
 
@@ -237,7 +261,7 @@ export async function recordScreenHits(date?: string): Promise<number> {
 
   const rows = await getAllSymbolViews();
   let written = 0;
-  const screens = await getAllScreens();
+  const screens = await getAllScreens("all");
 
   for (const screen of screens) {
     const values = evaluateScreen(screen, rows).map((match) => ({
@@ -282,10 +306,12 @@ async function hitsOn(screenId: string, date: string): Promise<string[]> {
   return rows.map((r) => r.symbol);
 }
 
-export async function runAllScreens(): Promise<ScreenResult[]> {
+export async function runAllScreens(
+  userId: string | null,
+): Promise<ScreenResult[]> {
   const asOf = await latestQuoteDate();
   const rows = await getAllSymbolViews();
-  const screens = await getAllScreens();
+  const screens = await getAllScreens(userId);
 
   return Promise.all(
     screens.map(async (screen) => {
@@ -312,8 +338,11 @@ export async function runAllScreens(): Promise<ScreenResult[]> {
   );
 }
 
-export async function runScreen(id: string): Promise<ScreenResult | null> {
-  const screen = await getScreen(id);
+export async function runScreen(
+  userId: string | null,
+  id: string,
+): Promise<ScreenResult | null> {
+  const screen = await getScreen(userId, id);
   if (!screen) return null;
 
   const asOf = await latestQuoteDate();
@@ -367,6 +396,7 @@ export async function toPreviewRows(
 }
 
 export async function updateCustomScreen(
+  userId: string,
   id: string,
   input: {
     name: string;
@@ -375,6 +405,7 @@ export async function updateCustomScreen(
     universe: ScreenUniverse;
   },
 ) {
+  if (!(await ownsScreen(userId, id))) return;
   await db.update(customScreens)
     .set({
       name: input.name,

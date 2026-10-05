@@ -1,3 +1,4 @@
+import { getCurrentUserId } from "@/lib/auth";
 import { desc, gte, and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { announcements } from "@/db/schema";
@@ -74,7 +75,9 @@ export default async function CalendarPage({
       ? indexParam.toUpperCase()
       : null;
 
-  const portfolio = await getPortfolio();
+  const userId = await getCurrentUserId();
+  const unlocked = userId != null;
+  const portfolio = await getPortfolio(userId);
   const held = portfolio.holdings
     .filter((h) => h.quantity > 0)
     .map((h) => h.symbol);
@@ -191,11 +194,13 @@ export default async function CalendarPage({
             active={scope === "all"}
             params={{ filter, index: indexCode ?? undefined }}
           />
-          <FilterChip
-            label={`My holdings${held.length ? ` (${held.length})` : ""}`}
-            active={scope === "held"}
-            params={{ filter, scope: "held", index: indexCode ?? undefined }}
-          />
+          {unlocked && (
+            <FilterChip
+              label={`My holdings${held.length ? ` (${held.length})` : ""}`}
+              active={scope === "held"}
+              params={{ filter, scope: "held", index: indexCode ?? undefined }}
+            />
+          )}
         </div>
       </div>
 

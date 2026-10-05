@@ -1,3 +1,4 @@
+import { getCurrentUserId } from "@/lib/auth";
 import Link from "next/link";
 import {
   getConstituents,
@@ -30,7 +31,6 @@ import {
   prettyDate,
   toneClass,
   signedMoney,
-  sectorLabel,
   relativeTime,
 } from "@/lib/format";
 
@@ -39,16 +39,18 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   if (await isDatabaseEmpty()) return <FirstRun />;
+  const userId = await getCurrentUserId();
 
   const [constituents, index, portfolio, recomposition, lastIngest, quoteDate] =
     await Promise.all([
       getConstituents(),
       getLatestIndexLevel(),
-      getPortfolio(),
+      getPortfolio(userId),
       detectRecomposition(),
       getLastIngest(),
       latestQuoteDate(),
     ]);
+  const unlocked = userId != null;
 
   const sectors = getSectorBreakdown(constituents);
 
@@ -133,9 +135,13 @@ export default async function DashboardPage() {
               <span className={toneClass(portfolio.totalPnl)}>
                 {signedMoney(portfolio.totalPnl)} total
               </span>
-            ) : (
+            ) : unlocked ? (
               <Link href="/portfolio" className="underline">
                 Add your holdings
+              </Link>
+            ) : (
+              <Link href="/login?next=%2F" className="underline">
+                Log in to see yours
               </Link>
             )
           }

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireUser } from "@/lib/auth";
 import { summariseByTaxYear, computeDisposals, type CostMethod } from "@/lib/cgt";
 import { isDatabaseEmpty } from "@/lib/market";
 import {
@@ -20,6 +21,7 @@ export default async function CgtPage({
 }: {
   searchParams: Promise<{ method?: string }>;
 }) {
+  const user = await requireUser("/cgt");
   if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
@@ -31,9 +33,9 @@ export default async function CgtPage({
   const { method: methodParam } = await searchParams;
   const method: CostMethod = methodParam === "fifo" ? "fifo" : "average";
 
-  const years = await summariseByTaxYear(method);
+  const years = await summariseByTaxYear(user.id, method);
   const other: CostMethod = method === "fifo" ? "average" : "fifo";
-  const otherDisposals = await computeDisposals(other);
+  const otherDisposals = await computeDisposals(user.id, other);
   const otherTotal = otherDisposals.reduce((s, d) => s + d.gain, 0);
   const thisTotal = years.reduce((s, y) => s + y.netGain, 0);
 

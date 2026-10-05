@@ -1,3 +1,4 @@
+import { getCurrentUserId } from "@/lib/auth";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { runScreen, describeRule } from "@/lib/screens";
@@ -31,12 +32,13 @@ export default async function ScreenDetailPage({
   }
 
   const { id } = await params;
-  const result = await runScreen(id);
+  const userId = await getCurrentUserId();
+  const result = await runScreen(userId, id);
   if (!result) notFound();
 
   const { screen, matches, newSymbols, droppedSymbols, previousDate } = result;
 
-  const portfolio = await getPortfolio();
+  const portfolio = await getPortfolio(userId);
   const held = new Set(
     portfolio.holdings.filter((h) => h.quantity > 0).map((h) => h.symbol),
   );

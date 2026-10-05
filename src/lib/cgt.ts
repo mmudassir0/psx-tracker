@@ -1,4 +1,4 @@
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { transactions } from "@/db/schema";
 
@@ -38,10 +38,15 @@ interface Lot {
   unitCost: number;
 }
 
-export async function computeDisposals(method: CostMethod): Promise<Disposal[]> {
+export async function computeDisposals(
+  userId: string | null,
+  method: CostMethod,
+): Promise<Disposal[]> {
+  if (!userId) return [];
   const ledger = await db
     .select()
     .from(transactions)
+    .where(eq(transactions.userId, userId))
     .orderBy(asc(transactions.date), asc(transactions.createdAt))
     .all();
 
@@ -134,12 +139,17 @@ function daysBetween(a: string, b: string): number {
   return Math.max(0, Math.round(ms / 86_400_000));
 }
 
-export async function summariseByTaxYear(method: CostMethod): Promise<TaxYearSummary[]> {
-  const disposals = await computeDisposals(method);
+export async function summariseByTaxYear(
+  userId: string | null,
+  method: CostMethod,
+): Promise<TaxYearSummary[]> {
+  if (!userId) return [];
+  const disposals = await computeDisposals(userId, method);
 
   const txs = await db
     .select()
     .from(transactions)
+    .where(eq(transactions.userId, userId))
     .all();
   const dividends = txs.filter((t) => t.type === "dividend");
 

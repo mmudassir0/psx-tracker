@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireUser } from "@/lib/auth";
 import { getPortfolio, listTransactions } from "@/lib/portfolio";
 import { getConstituents, isDatabaseEmpty } from "@/lib/market";
 import { deleteTransactionAction } from "@/app/actions";
@@ -28,6 +29,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function PortfolioPage() {
+  const user = await requireUser("/portfolio");
   if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No market data yet">
@@ -37,8 +39,8 @@ export default async function PortfolioPage() {
   }
 
   const [portfolio, ledger, constituents] = await Promise.all([
-    getPortfolio(),
-    listTransactions(),
+    getPortfolio(user.id),
+    listTransactions(user.id),
     getConstituents(),
   ]);
   const openPositions = portfolio.holdings.filter((h) => h.quantity > 0);

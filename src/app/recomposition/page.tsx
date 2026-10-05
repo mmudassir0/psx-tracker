@@ -1,3 +1,4 @@
+import { getCurrentUserId } from "@/lib/auth";
 import {
   getRecompositionHistory,
   getMembershipRuns,
@@ -50,7 +51,7 @@ export default async function RecompositionPage({
   const events = await getRecompositionHistory(indexCode);
   const runs = await getMembershipRuns(indexCode);
   const coverage = await getSnapshotCoverage(indexCode);
-  const portfolio = await getPortfolio();
+  const portfolio = await getPortfolio(await getCurrentUserId());
   const heldSymbols = new Set(
     portfolio.holdings.filter((h) => h.quantity > 0).map((h) => h.symbol),
   );

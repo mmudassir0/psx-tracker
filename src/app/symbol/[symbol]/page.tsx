@@ -1,3 +1,4 @@
+import { getCurrentUserId } from "@/lib/auth";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { desc, eq } from "drizzle-orm";
@@ -81,7 +82,7 @@ export default async function SymbolPage({
       .all(),
     getPayouts(symbol, 15),
     getCompanyFinancials(symbol),
-    getPortfolio(),
+    getPortfolio(await getCurrentUserId()),
   ]);
 
   const holding = portfolio.holdings.find((h) => h.symbol === symbol);

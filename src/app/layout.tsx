@@ -7,6 +7,7 @@ import { countUnacknowledgedEvents } from "@/lib/alerts";
 import { isDatabaseEmpty, latestQuoteDate } from "@/lib/market";
 import { expectedSessionDate, weekdaysBetween } from "@/lib/dates";
 import { prettyDate } from "@/lib/format";
+import { getCurrentUser } from "@/lib/auth";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,7 +28,8 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   // Guarded: the layout renders before the first ingest, when no tables exist.
   const empty = await isDatabaseEmpty();
-  const unreadAlerts = empty ? 0 : await countUnacknowledgedEvents();
+  const user = await getCurrentUser();
+  const unreadAlerts = empty ? 0 : await countUnacknowledgedEvents(user?.id ?? null);
 
   // One missing session is usually a PSX holiday; two means the daily job
   // is not landing and the numbers on screen should not be trusted.
@@ -52,7 +54,10 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                 Pakistan Stock Exchange
               </span>
             </Link>
-            <NavLinks unreadAlerts={unreadAlerts} />
+            <NavLinks
+              unreadAlerts={unreadAlerts}
+              user={user ? { name: user.name, isAdmin: user.role === "admin" } : null}
+            />
           </header>
 
           {lastSession && missedSessions >= 2 && (

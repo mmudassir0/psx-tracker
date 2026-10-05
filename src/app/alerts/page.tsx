@@ -1,3 +1,4 @@
+import { requireUser } from "@/lib/auth";
 import {
   listAlerts,
   listAlertEvents,
@@ -27,6 +28,7 @@ import { prettyDate, money } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function AlertsPage() {
+  const user = await requireUser("/alerts");
   if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
@@ -35,8 +37,8 @@ export default async function AlertsPage() {
     );
   }
 
-  const alerts = await listAlerts();
-  const events = await listAlertEvents(60);
+  const alerts = await listAlerts(user.id);
+  const events = await listAlertEvents(user.id, 60);
   const constituents = await getConstituents();
   const unacknowledged = events.filter((e) => !e.acknowledged);
 

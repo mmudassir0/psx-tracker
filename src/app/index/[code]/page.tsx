@@ -1,3 +1,4 @@
+import { getCurrentUserId } from "@/lib/auth";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
@@ -24,12 +25,7 @@ import {
   Badge,
   SymbolLink,
 } from "@/components/ui";
-import {
-  pct,
-  compactPkr,
-  prettyDate,
-  toneClass,
-} from "@/lib/format";
+import { compactPkr, prettyDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +58,7 @@ export default async function IndexPage({
   const levelHistory = await getIndexHistory(code);
   const quoteDate = await latestQuoteDate();
 
-  const portfolio = await getPortfolio();
+  const portfolio = await getPortfolio(await getCurrentUserId());
   const held = new Set(
     portfolio.holdings.filter((h) => h.quantity > 0).map((h) => h.symbol),
   );
@@ -74,9 +70,6 @@ export default async function IndexPage({
   const byChange = [...constituents]
     .filter((c) => c.changePct != null)
     .sort((a, b) => (b.changePct ?? 0) - (a.changePct ?? 0));
-
-  const topGainers = byChange.slice(0, 5);
-  const topLosers = [...byChange].reverse().slice(0, 5);
 
   // A 400-name index would make an unreadable bar chart; show the extremes.
   const MAX_BARS = 40;

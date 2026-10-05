@@ -27,6 +27,9 @@ const SCOPES: { key: IngestScope; label: string; hint: string }[] = [
 export function IngestButton({ compact = false }: { compact?: boolean }) {
   const router = useRouter();
   const [status, setStatus] = useState<IngestStatus | null>(null);
+  // Wall-clock time of the last poll, so the elapsed counter is computed from
+  // state instead of calling Date.now() during render.
+  const [polledAt, setPolledAt] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -35,6 +38,7 @@ export function IngestButton({ compact = false }: { compact?: boolean }) {
   const poll = useCallback(async () => {
     const next = await getIngestStatusAction();
     setStatus(next);
+    setPolledAt(Date.now());
 
     // Refresh the page data once, on the transition from running to done.
     if (wasRunning.current && !next.running) {
@@ -47,16 +51,18 @@ export function IngestButton({ compact = false }: { compact?: boolean }) {
     wasRunning.current = next.running;
   }, [router]);
 
-  useEffect(() => {
-    void poll();
-  }, [poll]);
-
   // Poll hard while a run is in flight, gently otherwise — this page can sit
-  // open for hours and the scheduled run should still show up.
+  // open for hours and the scheduled run should still show up. The first
+  // poll is deferred a tick so no state is set synchronously in the effect;
+  // it also re-polls at once whenever a run starts or stops.
   useEffect(() => {
     const interval = status?.running ? 1500 : 30_000;
+    const first = setTimeout(() => void poll(), 0);
     const id = setInterval(() => void poll(), interval);
-    return () => clearInterval(id);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
+    };
   }, [status?.running, poll]);
 
   const running = status?.running ?? false;
@@ -74,7 +80,7 @@ export function IngestButton({ compact = false }: { compact?: boolean }) {
 
   const elapsed =
     running && status?.startedAt
-      ? Math.max(0, Math.round((Date.now() - status.startedAt) / 1000))
+      ? Math.max(0, Math.round((polledAt - status.startedAt) / 1000))
       : null;
 
   return (

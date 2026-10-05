@@ -1,7 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { constituents } from "@/db/schema";
-import { TRACKED_INDEX, membersOn } from "@/lib/psx/ingest";
+import { TRACKED_INDEX } from "@/lib/psx/ingest";
 
 export interface RecompositionEvent {
   date: string;
@@ -13,21 +13,29 @@ export interface RecompositionEvent {
 export async function getRecompositionHistory(
   indexCode = TRACKED_INDEX,
 ): Promise<RecompositionEvent[]> {
-  const datesRows = await db
-    .selectDistinct({ date: constituents.date })
+  // One query for every snapshot: two per date pair grew by two round-trips
+  // a day, which is most of what made this page slow.
+  const rows = await db
+    .select({ date: constituents.date, symbol: constituents.symbol })
     .from(constituents)
     .where(eq(constituents.indexCode, indexCode))
-    .orderBy(desc(constituents.date))
     .all();
-  const dates = datesRows.map((r) => r.date);
+
+  const byDate = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const set = byDate.get(row.date);
+    if (set) set.add(row.symbol);
+    else byDate.set(row.date, new Set([row.symbol]));
+  }
+  const dates = [...byDate.keys()].sort().reverse();
 
   const events: RecompositionEvent[] = [];
 
   for (let i = 0; i < dates.length - 1; i++) {
     const current = dates[i];
     const previous = dates[i + 1];
-    const currentSet = new Set(await membersOn(indexCode, current));
-    const previousSet = new Set(await membersOn(indexCode, previous));
+    const currentSet = byDate.get(current)!;
+    const previousSet = byDate.get(previous)!;
 
     const added = [...currentSet].filter((s) => !previousSet.has(s)).sort();
     const dropped = [...previousSet].filter((s) => !currentSet.has(s)).sort();

@@ -1,3 +1,4 @@
+import { getCurrentUserId } from "@/lib/auth";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSectorMembers, getSectorName } from "@/lib/sectors";
@@ -6,9 +7,9 @@ import { getPortfolio } from "@/lib/portfolio";
 import { ScreenerTable } from "@/components/ScreenerTable";
 import { DivergingBars } from "@/components/DivergingBars";
 import {
-  Card, StatTile, PageHeader, EmptyState, SymbolLink,
+  Card, StatTile, PageHeader, EmptyState,
 } from "@/components/ui";
-import { pct, compactPkr, prettyDate, sectorLabel } from "@/lib/format";
+import { compactPkr, prettyDate, sectorLabel } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export default async function SectorPage({
   if (members.length === 0) return notFound();
 
   const name = await getSectorName(code);
-  const portfolio = await getPortfolio();
+  const portfolio = await getPortfolio(await getCurrentUserId());
   const held = new Set(
     portfolio.holdings.filter((h) => h.quantity > 0).map((h) => h.symbol),
   );
