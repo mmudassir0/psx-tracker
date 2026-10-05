@@ -2,7 +2,6 @@
  * EOD ingest. Run after market close (15:30 PKT).
  *
  *   npm run ingest                        # all indices, all fundamentals
- *   npm run ingest -- --backfill          # first run: also pull EOD history
  *   npm run ingest -- --indices=KMI30     # fundamentals for one index only
  *   npm run ingest -- --no-fundamentals   # quotes + membership only, fastest
  */
@@ -18,7 +17,6 @@ function flagValue(name: string): string | null {
 }
 
 async function main() {
-  const backfill = process.argv.includes("--backfill");
   const skipFundamentals = process.argv.includes("--no-fundamentals");
   const indicesArg = flagValue("indices");
   const fundamentalIndices = indicesArg
@@ -27,7 +25,6 @@ async function main() {
 
   const started = Date.now();
   console.log(`PSX ingest — ${new Date().toISOString()}`);
-  if (backfill) console.log("Mode: full history backfill (this takes a while)");
   if (fundamentalIndices)
     console.log(`Fundamentals limited to: ${fundamentalIndices.join(", ")}`);
 
@@ -37,7 +34,6 @@ async function main() {
 
   const result = await runIngest({
     trigger,
-    backfillHistory: backfill,
     includeFundamentals: !skipFundamentals,
     fundamentalScope: fundamentalIndices ? "indices" : "all",
     fundamentalIndices,
@@ -59,7 +55,6 @@ async function main() {
     );
   }
   console.log(`announcements:   ${result.announcementsWritten}`);
-  console.log(`EOD bars:        ${result.barsWritten}`);
 
   const snapshotted = sortIndexCodes(Object.keys(result.indexMemberCounts));
   if (snapshotted.length > 0) {

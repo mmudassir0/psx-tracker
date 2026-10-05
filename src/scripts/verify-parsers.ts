@@ -2,11 +2,10 @@
  * Smoke-test the PSX parsers against live pages.
  * Run: npx tsx src/scripts/verify-parsers.ts
  */
-import { psxFetch, psxFetchJson } from "@/lib/psx/client";
+import { psxFetch } from "@/lib/psx/client";
 import {
   parseMarketWatch,
   parseIndices,
-  parseEodSeries,
   parseCompanyPage,
   categorise,
 } from "@/lib/psx/parse";
@@ -18,7 +17,7 @@ async function main() {
   console.log(`parsed ${indices.length} indices`);
   console.log("KMI30:", kmi30);
 
-  console.log("\n== /market-watch ==");
+  console.log("\n== /screener ==");
   const rows = parseMarketWatch(await psxFetch("/screener"));
   const members = rows.filter((r) => r.isKmi30);
   console.log(`parsed ${rows.length} symbols, ${members.length} in KMI30`);
@@ -28,12 +27,6 @@ async function main() {
   );
   const sample = members.find((m) => m.symbol === "MEBL") ?? members[0];
   console.log("sample row:", sample);
-
-  console.log("\n== /timeseries/eod/MEBL ==");
-  const bars = parseEodSeries(await psxFetchJson("/timeseries/eod/MEBL"));
-  console.log(`parsed ${bars.length} bars`);
-  console.log("oldest:", bars[0]);
-  console.log("newest:", bars[bars.length - 1]);
 
   console.log("\n== /company/MEBL ==");
   const company = parseCompanyPage(await psxFetch("/company/MEBL"));

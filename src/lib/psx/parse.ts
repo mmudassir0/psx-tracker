@@ -1,5 +1,4 @@
 import * as cheerio from "cheerio";
-import { tsToPktDate } from "@/lib/dates";
 
 /**
  * A wrapped cheerio selection. Derived from the API's own return type because
@@ -29,7 +28,7 @@ function clean(text: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// /market-watch
+// /screener (replaced /market-watch, which PSX retired in Sep 2026)
 // ---------------------------------------------------------------------------
 
 export interface MarketWatchRow {
@@ -46,6 +45,8 @@ export interface MarketWatchRow {
   change: number | null;
   changePct: number | null;
   volume: number | null;
+  /** 30-session average share volume; PSX no longer publishes daily volume. */
+  avgVolume30d: number | null;
 }
 
 /**
@@ -67,14 +68,14 @@ export function normalizeSymbol(raw: string): string {
 }
 
 /**
- * Columns: SYMBOL | SECTOR | LISTED IN | LDCP | OPEN | HIGH | LOW | CURRENT |
- * CHANGE | CHANGE (%) | VOLUME
+ * Parses the /screener table. Columns: SYMBOL | SECTOR | LISTED IN |
+ * MARKET CAP | PRICE | CHANGE (%) | 1-YEAR CH. | PE | DIV YIELD | FREE FLOAT |
+ * 30D VOLUME AVG.
+ *
+ * It carries no OHLC or daily volume, so those stay null and LDCP is
+ * back-derived from the price and the change percentage.
  */
 export function parseMarketWatch(html: string): MarketWatchRow[] {
-  // PSX retired /market-watch; /screener is the replacement. Columns:
-  // symbol, sector, listed-in (indexes), mkt cap, price, change %, ...
-  // It carries no OHLC or daily volume, so those stay null and LDCP is
-  // back-derived from the price and the change percentage.
   const $ = cheerio.load(html);
   const rows: MarketWatchRow[] = [];
 
@@ -114,6 +115,7 @@ export function parseMarketWatch(html: string): MarketWatchRow[] {
       change,
       changePct,
       volume: null,
+      avgVolume30d: num(cells[10]),
     });
   });
 
@@ -159,64 +161,6 @@ export function parseIndices(html: string): IndexRow[] {
   });
 
   return rows;
-}
-
-// ---------------------------------------------------------------------------
-// /timeseries/eod/{SYMBOL}
-// ---------------------------------------------------------------------------
-
-export interface EodBar {
-  date: string;
-  close: number;
-  volume: number | null;
-  open: number | null;
-}
-
-interface PsxTimeseriesResponse {
-  status: number;
-  message: string;
-  /** Verified tuple order: [unixSeconds, close, volume, open]. No high/low. */
-  data: [number, number, number, number][];
-}
-
-export function parseEodSeries(json: unknown): EodBar[] {
-  const payload = json as PsxTimeseriesResponse;
-  if (!payload || !Array.isArray(payload.data)) return [];
-
-  const bars = payload.data
-    .filter((row) => Array.isArray(row) && row.length >= 2)
-    .map((row) => ({
-      date: tsToPktDate(row[0]),
-      close: row[1],
-      volume: Number.isFinite(row[2]) ? row[2] : null,
-      open: Number.isFinite(row[3]) ? row[3] : null,
-    }))
-    .filter((bar) => Number.isFinite(bar.close));
-
-  // PSX returns newest-first; dedupe by date keeping the newest observation.
-  const byDate = new Map<string, EodBar>();
-  for (const bar of bars) {
-    if (!byDate.has(bar.date)) byDate.set(bar.date, bar);
-  }
-  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
-}
-
-/** Intraday tuple order: [unixSeconds, price, volume]. */
-export function parseIntradaySeries(
-  json: unknown,
-): { ts: number; price: number; volume: number | null }[] {
-  const payload = json as {
-    data?: [number, number, number][];
-  };
-  if (!payload || !Array.isArray(payload.data)) return [];
-  return payload.data
-    .filter((row) => Array.isArray(row) && row.length >= 2)
-    .map((row) => ({
-      ts: row[0],
-      price: row[1],
-      volume: Number.isFinite(row[2]) ? row[2] : null,
-    }))
-    .sort((a, b) => a.ts - b.ts);
 }
 
 // ---------------------------------------------------------------------------
@@ -597,135 +541,4 @@ export function parseFinancials(html: string): FinancialCell[] {
   }
 
   return out;
-}
-
-// ---------------------------------------------------------------------------
-// POST /company/payouts  (body: symbol=XXX)
-// ---------------------------------------------------------------------------
-
-export type PayoutKind = "cash_dividend" | "bonus" | "rights" | "other";
-
-export interface PayoutRow {
-  /** Announcement date, "YYYY-MM-DD". */
-  date: string;
-  /** Period the payout relates to, e.g. "30/06/2026(HYR)". */
-  period: string | null;
-  kind: PayoutKind;
-  /** Percent of face value, e.g. 145 for "145%". */
-  percent: number | null;
-  /** PKR per share, assuming the PKR 10 face value standard on PSX. */
-  perShare: number | null;
-  /** "F" for final, "i"/"ii"/"iii" for interim instalments. */
-  instalment: string | null;
-  bookClosureFrom: string | null;
-  bookClosureTo: string | null;
-  /** Raw Details cell, kept so anything unparsed is still inspectable. */
-  raw: string;
-}
-
-/** PSX quotes payouts as a percent of face value; PKR 10 is the standard. */
-export const FACE_VALUE_PKR = 10;
-
-/**
- * Parse the payouts fragment.
- *
- * Columns: Date | Financial Results | Details | Book Closure
- *
- * The Details cell is messy in the wild. Observed across a 45-symbol sample:
- *   "145%(ii) (D)"   "85%(F) (D)"      "32.50%(iii) (D)"
- *   "100% (D)"       "60%(I) (D)"      "DIVIDEND =350% (F)"
- *   "50%F) (D)"      "40%(ii (D)"      <- unbalanced parentheses
- *   "10%(i) (D) - 5%(i) (D)"           <- two payouts in one row
- * So percentages are extracted by regex and summed rather than matched against
- * a single rigid shape, and the type code is read from the trailing marker.
- */
-export function parsePayouts(html: string): PayoutRow[] {
-  const $ = cheerio.load(html);
-  const out: PayoutRow[] = [];
-
-  $("tr").each((_, tr) => {
-    const cells = $(tr)
-      .find("td")
-      .map((__, td) => clean($(td).text()))
-      .get();
-    if (cells.length < 3) return;
-
-    const date = parsePayoutDate(cells[0]);
-    if (!date) return;
-
-    const period = cells[1] || null;
-    const details = cells[2] ?? "";
-    const [from, to] = parseBookClosure(cells[3] ?? "");
-
-    // Sum every percentage in the cell so combined rows aren't halved.
-    const percents = [...details.matchAll(/(\d+(?:\.\d+)?)\s*%/g)].map((m) =>
-      Number(m[1]),
-    );
-    const percent = percents.length
-      ? percents.reduce((sum, p) => sum + p, 0)
-      : null;
-
-    out.push({
-      date,
-      period,
-      kind: payoutKind(details),
-      percent,
-      perShare: percent == null ? null : (percent / 100) * FACE_VALUE_PKR,
-      instalment: parseInstalment(details),
-      bookClosureFrom: from,
-      bookClosureTo: to,
-      raw: details,
-    });
-  });
-
-  return out.sort((a, b) => b.date.localeCompare(a.date));
-}
-
-/** Trailing "(D)" / "(B)" / "(R)" marker, tolerating missing parentheses. */
-function payoutKind(details: string): PayoutKind {
-  const upper = details.toUpperCase();
-  const trailing = upper.match(/\(?([DBR])\)?\s*$/);
-  const code = trailing?.[1];
-  if (code === "B") return "bonus";
-  if (code === "R") return "rights";
-  if (code === "D") return "cash_dividend";
-  // Some rows spell it out instead of using a code.
-  if (upper.includes("DIVIDEND")) return "cash_dividend";
-  if (upper.includes("BONUS")) return "bonus";
-  if (upper.includes("RIGHT")) return "rights";
-  return "other";
-}
-
-/** "(F)" final, or "(i)"/"(ii)"/"(iii)"/"(I)" interim instalment. */
-function parseInstalment(details: string): string | null {
-  const match = details.match(/\(?\s*(F|i{1,3}|I{1,3})\s*\)?/);
-  if (!match) return null;
-  const value = match[1];
-  return value === "F" ? "F" : value.toLowerCase();
-}
-
-/** "July 29, 2026 3:23 PM" -> "2026-07-29". */
-function parsePayoutDate(raw: string): string | null {
-  const text = clean(raw).replace(/\s+\d{1,2}:\d{2}\s*(AM|PM)?$/i, "");
-  return parseLooseDate(text);
-}
-
-/** "11/08/2026 - 13/08/2026" (dd/mm/yyyy) -> ISO pair. */
-function parseBookClosure(raw: string): [string | null, string | null] {
-  const parts = clean(raw).split("-");
-  if (parts.length < 2) {
-    const single = parseDmy(parts[0] ?? "");
-    return [single, single];
-  }
-  return [parseDmy(parts[0]), parseDmy(parts[1])];
-}
-
-function parseDmy(raw: string): string | null {
-  const match = clean(raw).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (!match) return null;
-  const [, d, m, y] = match;
-  const day = Number(d);
-  const month = Number(m);
-  if (day < 1 || day > 31 || month < 1 || month > 12) return null;
-  return `${y}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }

@@ -18,7 +18,7 @@ type SortKey =
   | "changePct"
   | "indexWeightPct"
   | "peTtm"
-  | "volume"
+  | "avgVolume30d"
   | "ytdChangePct"
   | "year1ChangePct"
   | "drawdownFrom52wPct"
@@ -39,9 +39,13 @@ const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
   { key: "netMarginPct", label: "Net margin", align: "right" },
   { key: "indexWeightPct", label: "Weight", align: "right" },
   { key: "marketCap", label: "Mkt cap", align: "right" },
-  { key: "volume", label: "Volume", align: "right" },
+  { key: "avgVolume30d", label: "Avg vol 30D", align: "right" },
   { key: "drawdownFrom52wPct", label: "Off 52w hi", align: "right" },
 ];
+
+function roundOrNull(n: number | null): number | null {
+  return n == null ? null : Math.round(n);
+}
 
 export function ScreenerTable({ rows }: { rows: ConstituentView[] }) {
   const [sortKey, setSortKey] = useState<SortKey>("indexWeightPct");
@@ -215,7 +219,7 @@ export function ScreenerTable({ rows }: { rows: ConstituentView[] }) {
                 <Td align="right">{pct(r.netMarginPct, 1, false)}</Td>
                 <Td align="right">{pct(r.indexWeightPct, 2, false)}</Td>
                 <Td align="right">{compactPkr(r.marketCap)}</Td>
-                <Td align="right">{count(r.volume)}</Td>
+                <Td align="right">{count(roundOrNull(r.avgVolume30d))}</Td>
                 <Td align="right" className="text-slate-500">
                   {pct(r.drawdownFrom52wPct, 1, false)}
                 </Td>

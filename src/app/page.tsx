@@ -162,7 +162,7 @@ export default async function DashboardPage() {
                 name: c.name,
                 value: c.changePct,
                 close: c.close,
-                volume: c.volume,
+                volume: c.avgVolume30d,
                 weightPct: c.indexWeightPct,
               }))}
             />
@@ -208,7 +208,7 @@ export default async function DashboardPage() {
                 <Th align="right">Change</Th>
                 <Th align="right">Weight</Th>
                 <Th align="right">P/E</Th>
-                <Th align="right">Volume</Th>
+                <Th align="right">Avg vol 30D</Th>
                 <Th align="right">Off 52w high</Th>
               </tr>
             </thead>
@@ -232,7 +232,9 @@ export default async function DashboardPage() {
                   <Td align="right">
                     {c.peTtm != null ? c.peTtm.toFixed(2) : "—"}
                   </Td>
-                  <Td align="right">{count(c.volume)}</Td>
+                  <Td align="right">
+                    {count(c.avgVolume30d == null ? null : Math.round(c.avgVolume30d))}
+                  </Td>
                   <Td align="right" className="text-slate-500">
                     {pct(c.drawdownFrom52wPct, 1, false)}
                   </Td>

@@ -4,7 +4,9 @@ import Link from "next/link";
 import "./globals.css";
 import { NavLinks } from "@/components/NavLinks";
 import { countUnacknowledgedEvents } from "@/lib/alerts";
-import { isDatabaseEmpty } from "@/lib/market";
+import { isDatabaseEmpty, latestQuoteDate } from "@/lib/market";
+import { expectedSessionDate, weekdaysBetween } from "@/lib/dates";
+import { prettyDate } from "@/lib/format";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,6 +29,13 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   const empty = await isDatabaseEmpty();
   const unreadAlerts = empty ? 0 : await countUnacknowledgedEvents();
 
+  // One missing session is usually a PSX holiday; two means the daily job
+  // is not landing and the numbers on screen should not be trusted.
+  const lastSession = empty ? null : await latestQuoteDate();
+  const missedSessions = lastSession
+    ? weekdaysBetween(lastSession, expectedSessionDate())
+    : 0;
+
   return (
     <html
       lang="en"
@@ -45,6 +54,22 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
             </Link>
             <NavLinks unreadAlerts={unreadAlerts} />
           </header>
+
+          {lastSession && missedSessions >= 2 && (
+            <div
+              role="alert"
+              className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+            >
+              <span className="font-medium">Prices may be out of date.</span>{" "}
+              The latest data is from {prettyDate(lastSession)}, about{" "}
+              {missedSessions} trading sessions behind. The daily update may be
+              failing; check{" "}
+              <Link href="/health" className="underline">
+                Health
+              </Link>
+              .
+            </div>
+          )}
 
           <main className="flex-1 py-6">{children}</main>
 

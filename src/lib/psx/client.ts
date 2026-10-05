@@ -115,19 +115,6 @@ export async function psxFetch(
   );
 }
 
-/** GET and parse JSON from a PSX endpoint. */
-export async function psxFetchJson<T>(
-  path: string,
-  options?: FetchOptions,
-): Promise<T> {
-  const body = await psxFetch(path, options);
-  try {
-    return JSON.parse(body) as T;
-  } catch {
-    throw new PsxError("Response was not valid JSON", path);
-  }
-}
-
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

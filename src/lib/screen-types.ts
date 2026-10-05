@@ -50,7 +50,7 @@ export const METRIC_LABELS: Record<ScreenMetric, string> = {
   drawdownFrom52wPct: "% below 52-week high",
   changePct: "Day change %",
   marketCap: "Market cap (PKR)",
-  tradedValue: "Traded value today (PKR)",
+  tradedValue: "Avg traded value, 30 days (PKR)",
 };
 
 export const OP_LABELS: Record<ScreenOp, string> = {
@@ -84,7 +84,7 @@ export const BUILDER_METRICS: {
   { metric: "marketCap", label: "Market cap", unit: "PKR", step: 1_000_000_000 },
   {
     metric: "tradedValue",
-    label: "Traded value today",
+    label: "Avg traded value (30D)",
     unit: "PKR",
     step: 10_000_000,
   },

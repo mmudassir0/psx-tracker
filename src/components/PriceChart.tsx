@@ -5,12 +5,20 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  ReferenceArea,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 import { money, prettyDate } from "@/lib/format";
+import { weekdaysBetween } from "@/lib/dates";
+
+/**
+ * Missing weekday sessions in a row before a gap is shaded. Eid closures run
+ * three or four sessions, and those are holidays, not missing data.
+ */
+const GAP_MIN_SESSIONS = 5;
 
 export interface PricePoint {
   date: string;
@@ -62,6 +70,20 @@ export function PriceChart({
     return [Math.max(0, min - pad), max + pad] as [number, number];
   }, [filtered]);
 
+  // Stretches with no data (PSX outages, scraper failures). The line would
+  // otherwise draw straight across and read as a real price move.
+  const gaps = useMemo(() => {
+    const out: { from: string; to: string }[] = [];
+    for (let i = 1; i < filtered.length; i++) {
+      const prev = filtered[i - 1].date;
+      const next = filtered[i].date;
+      if (weekdaysBetween(prev, next) - 1 >= GAP_MIN_SESSIONS) {
+        out.push({ from: prev, to: next });
+      }
+    }
+    return out;
+  }, [filtered]);
+
   const first = filtered[0]?.close;
   const last = filtered[filtered.length - 1]?.close;
   const changePct =
@@ -70,11 +92,8 @@ export function PriceChart({
   if (data.length < 2) {
     return (
       <p className="py-8 text-center text-sm text-slate-500 dark:text-slate-400">
-        Not enough price history yet. Run an ingest with{" "}
-        <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">
-          --backfill
-        </code>
-        .
+        Not enough price history yet. It builds up one session per day as
+        the daily update runs.
       </p>
     );
   }
@@ -179,6 +198,16 @@ export function PriceChart({
                 );
               }}
             />
+            {gaps.map((g) => (
+              <ReferenceArea
+                key={g.from}
+                x1={g.from}
+                x2={g.to}
+                fill="var(--chart-muted)"
+                fillOpacity={0.12}
+                ifOverflow="hidden"
+              />
+            ))}
             <Area
               type="monotone"
               dataKey="close"
@@ -192,6 +221,15 @@ export function PriceChart({
           </AreaChart>
         </ResponsiveContainer>
       </div>
+      {gaps.length > 0 && (
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+          Shaded: no data between{" "}
+          {gaps
+            .map((g) => `${prettyDate(g.from)} and ${prettyDate(g.to)}`)
+            .join("; ")}
+          . The line across it is not real trading.
+        </p>
+      )}
     </div>
   );
 }

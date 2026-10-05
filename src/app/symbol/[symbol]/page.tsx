@@ -202,7 +202,12 @@ export default async function SymbolPage({
             <Stat label="Previous close" value={money(view?.ldcp ?? null)} />
             <Stat label="Day high" value={money(view?.high ?? null)} />
             <Stat label="Day low" value={money(view?.low ?? null)} />
-            <Stat label="Volume" value={count(view?.volume ?? null)} />
+            <Stat
+              label="Avg vol (30D)"
+              value={count(
+                view?.avgVolume30d == null ? null : Math.round(view.avgVolume30d),
+              )}
+            />
             <Stat label="Market cap" value={compactPkr(view?.marketCap ?? null)} />
             <Stat
               label="Free-float cap"

@@ -17,25 +17,19 @@ import {
   Th,
   Td,
 } from "@/components/ui";
-import { money, compactPkr, count, prettyDate } from "@/lib/format";
+import { money, compactPkr, count } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
-
-const WINDOWS = [
-  { key: "30", label: "30 days", days: 30 },
-  { key: "90", label: "90 days", days: 90 },
-  { key: "180", label: "180 days", days: 180 },
-];
 
 export default async function LiquidityPage({
   searchParams,
 }: {
-  searchParams: Promise<{ index?: string; window?: string; held?: string }>;
+  searchParams: Promise<{ index?: string; held?: string }>;
 }) {
   if (await isDatabaseEmpty()) {
     return (
       <EmptyState title="No data yet">
-        Run <code>npm run setup</code> to populate volume history.
+        Run <code>npm run ingest</code> to populate the database.
       </EmptyState>
     );
   }
@@ -47,18 +41,13 @@ export default async function LiquidityPage({
     sp.index && available.includes(sp.index.toUpperCase())
       ? sp.index.toUpperCase()
       : DEFAULT_INDEX;
-  const windowKey = WINDOWS.some((w) => w.key === sp.window)
-    ? sp.window!
-    : "90";
-  const days = WINDOWS.find((w) => w.key === windowKey)!.days;
   const heldOnly = sp.held === "1";
 
-  const report = await buildLiquidityReport({ indexCode, days, heldOnly });
+  const report = await buildLiquidityReport({ indexCode, heldOnly });
 
   const link = (o: Record<string, string>) => {
     const p = new URLSearchParams({
       index: indexCode,
-      window: windowKey,
       ...(heldOnly ? { held: "1" } : {}),
       ...o,
     });
@@ -75,9 +64,9 @@ export default async function LiquidityPage({
         title="Liquidity"
         description={
           <>
-            Traded value per session for {indexLabel(indexCode)}, since{" "}
-            {prettyDate(report.fromDate)}. Index membership says nothing about
-            whether you can get out of a name in size.
+            Average traded value per session for {indexLabel(indexCode)}, over
+            the last 30 sessions. Index membership says nothing about whether
+            you can get out of a name in size.
           </>
         }
       />
@@ -91,15 +80,8 @@ export default async function LiquidityPage({
             </Chip>
           ))}
         </ChipRow>
-        <ChipRow label="Window">
-          {WINDOWS.map((w) => (
-            <Chip key={w.key} href={link({ window: w.key })} active={w.key === windowKey}>
-              {w.label}
-            </Chip>
-          ))}
-        </ChipRow>
         <ChipRow label="Scope">
-          <Chip href={`/liquidity?index=${indexCode}&window=${windowKey}`} active={!heldOnly}>
+          <Chip href={`/liquidity?index=${indexCode}`} active={!heldOnly}>
             All constituents
           </Chip>
           <Chip href={link({ held: "1" })} active={heldOnly}>
@@ -133,7 +115,7 @@ export default async function LiquidityPage({
                 <span className="tabular font-medium">
                   {r.daysToExit!.toFixed(1)} sessions
                 </span>{" "}
-                at {Math.round(PARTICIPATION_RATE * 100)}% of median daily value
+                at {Math.round(PARTICIPATION_RATE * 100)}% of average daily value
               </li>
             ))}
           </ul>
@@ -142,7 +124,7 @@ export default async function LiquidityPage({
 
       <Card
         title="Traded value by symbol"
-        subtitle={`Median is used for the tier because a single block trade can double a mean. Exit estimate assumes you are ${Math.round(PARTICIPATION_RATE * 100)}% of a session's value.`}
+        subtitle={`PSX publishes only a 30-session average, which block trades pull upward, so tiers and exit estimates lean optimistic. Exit estimate assumes you are ${Math.round(PARTICIPATION_RATE * 100)}% of a session's value.`}
       >
         {report.rows.length === 0 ? (
           <p className="py-6 text-center text-sm text-slate-500 dark:text-slate-400">
@@ -154,10 +136,8 @@ export default async function LiquidityPage({
               <thead>
                 <tr>
                   <Th>Symbol</Th>
-                  <Th align="right">Median daily value</Th>
-                  <Th align="right">Mean</Th>
+                  <Th align="right">Avg daily value</Th>
                   <Th align="right">Avg volume</Th>
-                  <Th align="right">Traded sessions</Th>
                   <Th align="right">Your position</Th>
                   <Th align="right">Sessions to exit</Th>
                   <Th>Tier</Th>
@@ -172,15 +152,9 @@ export default async function LiquidityPage({
                     <Td>
                       <SymbolLink symbol={r.symbol} />
                     </Td>
-                    <Td align="right">{compactPkr(r.medianValue)}</Td>
-                    <Td align="right" className="text-slate-500">
-                      {compactPkr(r.avgValue)}
-                    </Td>
+                    <Td align="right">{compactPkr(r.avgValue)}</Td>
                     <Td align="right" className="text-slate-500">
                       {count(r.avgVolume ? Math.round(r.avgVolume) : null)}
-                    </Td>
-                    <Td align="right" className="text-slate-500">
-                      {r.tradedSessions}/{r.totalSessions}
                     </Td>
                     <Td align="right">
                       {r.positionValue ? money(r.positionValue) : "—"}

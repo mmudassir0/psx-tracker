@@ -16,6 +16,14 @@ export function assertScratchDatabase(): string {
   const configured = process.env.DB_PATH;
   const real = path.join(process.cwd(), "data", "kmi30.db");
 
+  // `@/db` prefers Turso whenever it is configured, regardless of DB_PATH.
+  if (process.env.TURSO_DATABASE_URL) {
+    throw new Error(
+      "TURSO_DATABASE_URL is set, so tests would hit the production database. " +
+        "Run tests via `npm test`, which clears it.",
+    );
+  }
+
   if (!configured) {
     throw new Error(
       "DB_PATH is not set. Run this test via its npm script, which points it " +

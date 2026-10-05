@@ -133,11 +133,8 @@ export function metricValue(
   row: ConstituentView,
   metric: ScreenMetric,
 ): number | null {
-  if (metric === "tradedValue") {
-    return row.volume != null && row.close != null
-      ? row.volume * row.close
-      : null;
-  }
+  // PSX no longer publishes daily volume; the 30-session average stands in.
+  if (metric === "tradedValue") return row.avgTradedValue30d;
   return (row[metric] as number | null) ?? null;
 }
 

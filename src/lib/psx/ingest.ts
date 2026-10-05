@@ -8,28 +8,21 @@ import {
   constituents,
   companyStats,
   announcements as announcementsTable,
-  payouts as payoutsTable,
   financials as financialsTable,
   ingestRuns,
 } from "@/db/schema";
-import { psxFetch, psxFetchJson, mapLimit, PsxError, PSX_BASE } from "./client";
+import { psxFetch, mapLimit, PsxError } from "./client";
 import {
   parseMarketWatch,
   parseIndices,
-  parseEodSeries,
   parseCompanyPage,
   categorise,
-  parsePayouts,
   parseFinancials,
   type MarketWatchRow,
-  type PayoutRow,
 } from "./parse";
 import { todayPkt, isMarketOpen, addDays, pktDateToUtc } from "@/lib/dates";
 
 export const TRACKED_INDEX = "KMI30";
-
-/** Liquid names used only to discover the latest completed session date. */
-const REFERENCE_SYMBOLS = ["OGDC", "MEBL", "LUCK"];
 
 /** KMI30 holds exactly 30 constituents, as the name says. */
 export const EXPECTED_KMI30_SIZE = 30;
@@ -119,32 +112,19 @@ async function previousMemberCount(indexCode: string, date: string): Promise<num
 }
 
 /**
- * Work out which trading session the live market-watch page is showing.
+ * Work out which trading session /screener is showing.
  *
- * When the market is closed, market-watch still displays the *previous*
- * session's numbers. Stamping those with today's date would invent a
- * duplicate flat day, so outside trading hours we trust the EOD timeseries,
- * which is stamped at the closing bell.
+ * When the market is closed, PSX still displays the *previous* session's
+ * numbers. Stamping those with today's date would invent a duplicate flat
+ * day, so outside trading hours we read the session from the "As of" stamp
+ * on the home page's index tiles.
  */
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export async function resolveSessionDate(): Promise<string> {
   if (isMarketOpen()) return todayPkt();
 
-  for (const symbol of REFERENCE_SYMBOLS) {
-    try {
-      const bars = parseEodSeries(
-        await psxFetchJson(`/timeseries/eod/${symbol}`, { ttlMs: 60_000 }),
-      );
-      const newest = bars[bars.length - 1];
-      if (newest?.date) return newest.date;
-    } catch {
-      // Try the next reference symbol.
-    }
-  }
-
-  // PSX withdrew the EOD timeseries; the home page's index tiles carry an
-  // "As of Oct 2, 2026 4:50 PM" stamp for the session they show.
+  // e.g. "As of Oct 2, 2026 4:50 PM"
   try {
     const home = await psxFetch("/", { ttlMs: 60_000 });
     const m = home.match(/As of\s+([A-Z][a-z]{2}) (\d{1,2}), (\d{4})/);
@@ -158,7 +138,7 @@ export async function resolveSessionDate(): Promise<string> {
     // Fall through.
   }
 
-  // Every reference lookup failed. Today is the least-wrong fallback, but
+  // The home page was unreachable. Today is the least-wrong fallback, but
   // never a weekend: those quotes belong to Friday's session.
   let fallback = todayPkt();
   while ([0, 6].includes(pktDateToUtc(fallback).getUTCDay())) {
@@ -173,8 +153,6 @@ function stableId(...parts: string[]): string {
 }
 
 export interface IngestOptions {
-  /** Also pull full EOD history (slow; run on first setup). */
-  backfillHistory?: boolean;
   /** Pull company fundamentals + announcements. */
   includeFundamentals?: boolean;
   /**
@@ -213,12 +191,7 @@ export interface IngestResult {
   /** Symbols skipped because a previous run found no company page. */
   pagesSkipped: number;
   quotesWritten: number;
-  barsWritten: number;
-  /** Historical index-level bars written during a backfill. */
-  indexBarsWritten: number;
   announcementsWritten: number;
-  /** Payout rows written from the PSX payouts fragment. */
-  payoutsWritten: number;
   /** Financial/ratio cells written. */
   financialCellsWritten: number;
   /** True when KMI30's snapshot specifically was withheld. */
@@ -234,7 +207,6 @@ export async function runIngest(
   options: IngestOptions = {},
 ): Promise<IngestResult> {
   const {
-    backfillHistory = false,
     includeFundamentals = true,
     fundamentalScope = "all",
     fundamentalIndices = [TRACKED_INDEX],
@@ -256,15 +228,21 @@ export async function runIngest(
   // this is what lets the browser show real progress instead of a spinner.
   const onProgress = (message: string) => {
     onProgressOption(message);
-    try {
-      void db
-        .update(ingestRuns)
-        .set({ progress: message.trim() })
-        .where(eq(ingestRuns.id, runId))
-        .run();
-    } catch {
-      // Progress reporting must never break the ingest itself.
-    }
+    // Fire-and-forget, so the rejection must be caught here: an unhandled
+    // one (a Turso network blip) would kill the whole process.
+    // Promise.resolve().then also covers the local driver, which is
+    // synchronous and would throw instead of rejecting.
+    void Promise.resolve()
+      .then(() =>
+        db
+          .update(ingestRuns)
+          .set({ progress: message.trim() })
+          .where(eq(ingestRuns.id, runId))
+          .run(),
+      )
+      .catch(() => {
+        // Progress reporting must never break the ingest itself.
+      });
   };
 
   onProgress("Resolving session date…");
@@ -281,10 +259,7 @@ export async function runIngest(
     pagesMarkedMissing: 0,
     pagesSkipped: 0,
     quotesWritten: 0,
-    barsWritten: 0,
-    indexBarsWritten: 0,
     announcementsWritten: 0,
-    payoutsWritten: 0,
     financialCellsWritten: 0,
     membershipSkipped: false,
     errors,
@@ -411,8 +386,8 @@ export async function runIngest(
       );
     }
 
-    // --- 3. EOD history -------------------------------------------------
-    // Symbols in at least one index — the universe worth keeping history for.
+    // --- 3. Fundamentals + announcements --------------------------------
+    // Symbols in at least one index — the universe worth fetching pages for.
     const indexedSymbols = [...new Set([...byIndex.values()].flat())];
     const fundamentalSymbols =
       fundamentalScope === "all"
@@ -422,51 +397,6 @@ export async function runIngest(
               fundamentalIndices.flatMap((code) => byIndex.get(code) ?? []),
             ),
           ];
-    const memberSymbols = indexedSymbols;
-    if (backfillHistory && !(await eodEndpointAvailable(memberSymbols[0]))) {
-      // PSX withdrew /timeseries/eod; without this probe every symbol burns
-      // a full retry cycle on a guaranteed 404.
-      errors.push("EOD history endpoint unavailable (404) — backfill skipped");
-      onProgress("EOD history endpoint unavailable — skipping backfill");
-    } else if (backfillHistory) {
-      // Index codes work on the same timeseries endpoint as equities, which is
-      // what makes a benchmark comparison possible at all.
-      const indexCodes = [...byIndex.keys()];
-      onProgress(`Backfilling level history for ${indexCodes.length} indices…`);
-      await mapLimit(indexCodes, concurrency, async (code) => {
-        try {
-          const bars = parseEodSeries(
-            await psxFetchJson(`/timeseries/eod/${code}`, { ttlMs: 0 }),
-          );
-          await writeIndexLevelBars(code, bars);
-          result.indexBarsWritten += bars.length;
-        } catch (err) {
-          errors.push(`index eod ${code}: ${String(err)}`);
-        }
-      });
-      onProgress(`  ${result.indexBarsWritten} index bars`);
-
-      onProgress(`Backfilling EOD history for ${memberSymbols.length} symbols…`);
-      let backfilled = 0;
-      await mapLimit(memberSymbols, concurrency, async (symbol) => {
-        try {
-          const bars = parseEodSeries(
-            await psxFetchJson(`/timeseries/eod/${symbol}`, { ttlMs: 0 }),
-          );
-          await writeEodBars(symbol, bars);
-          result.barsWritten += bars.length;
-        } catch (err) {
-          errors.push(`eod ${symbol}: ${String(err)}`);
-        } finally {
-          backfilled++;
-          if (backfilled % 50 === 0 || backfilled === memberSymbols.length) {
-            onProgress(`  ${backfilled}/${memberSymbols.length} symbols`);
-          }
-        }
-      });
-    }
-
-    // --- 4. Fundamentals + announcements --------------------------------
     if (includeFundamentals) {
       const dead = recheckCompanyPages ? new Set<string>() : await missingPageSymbols();
       const toFetch = fundamentalSymbols.filter((s) => !dead.has(s));
@@ -485,7 +415,6 @@ export async function runIngest(
           ")…",
       );
       let done = 0;
-      let payoutsBlocked = false;
       await mapLimit(toFetch, concurrency, async (symbol) => {
         try {
           // Extra retries: PSX rate-limits bursts of company pages (429).
@@ -583,33 +512,6 @@ export async function runIngest(
           }
           result.announcementsWritten += announcementRows.length;
 
-          // Real payout rates come from a separate POST fragment. Announcement
-          // titles normally omit the rate, so this is the only source for it.
-          if (payoutsBlocked) {
-            // skipped: endpoint refused an earlier request this run
-          } else try {
-            const payoutRows = parsePayouts(
-              await psxFetch("/company/payouts", {
-                form: { symbol },
-                referer: `${PSX_BASE}/company/${symbol}`,
-                ttlMs: 0,
-              }),
-            );
-            for (const p of payoutRows) {
-              await writePayout(symbol, p);
-            }
-            result.payoutsWritten += payoutRows.length;
-          } catch (err) {
-            if (err instanceof PsxError && (err.status === 403 || err.status === 404)) {
-              // PSX now gates this fragment behind a session token; one
-              // refusal means every later symbol would be refused too.
-              if (!payoutsBlocked) onProgress(`  payouts endpoint refused (${err.status}) — payouts skipped`);
-              payoutsBlocked = true;
-            } else {
-              errors.push(`payouts ${symbol}: ${String(err)}`);
-            }
-          }
-
           result.fundamentalsFetched++;
         } catch (err) {
           // A 500 here means PSX has no company page for this counter at all.
@@ -678,6 +580,7 @@ async function upsertSymbols(rows: MarketWatchRow[]) {
           sectorCode: row.sectorCode,
           indexes: row.indexes.join(","),
           isKmi30: row.isKmi30,
+          avgVolume30d: row.avgVolume30d,
           updatedAt: now,
         })),
       )
@@ -687,6 +590,7 @@ async function upsertSymbols(rows: MarketWatchRow[]) {
           sectorCode: sql`excluded.sector_code`,
           indexes: sql`excluded.indexes`,
           isKmi30: sql`excluded.is_kmi30`,
+          avgVolume30d: sql`excluded.avg_volume_30d`,
           updatedAt: sql`excluded.updated_at`,
         },
       })
@@ -694,19 +598,9 @@ async function upsertSymbols(rows: MarketWatchRow[]) {
   }
 }
 
-async function eodEndpointAvailable(symbol: string | undefined): Promise<boolean> {
-  if (!symbol) return false;
-  try {
-    await psxFetch(`/timeseries/eod/${symbol}`, { ttlMs: 0, retries: 0 });
-    return true;
-  } catch (err) {
-    return !(err instanceof PsxError && err.status === 404);
-  }
-}
-
 /**
- * Live quotes always win over an EOD row for close/LDCP. /screener has no
- * OHLC or daily volume, so coalesce keeps whatever an earlier source stored.
+ * Live quotes always win for close/LDCP. /screener has no OHLC or daily
+ * volume, so coalesce keeps whatever older EOD history already stored.
  */
 async function writeMarketWatchQuotes(rows: MarketWatchRow[], date: string): Promise<number> {
   const values = rows.flatMap((row) => {
@@ -744,116 +638,6 @@ async function writeMarketWatchQuotes(rows: MarketWatchRow[], date: string): Pro
       .run();
   }
   return values.length;
-}
-
-/**
- * Historical index levels. Same tuple shape as equities —
- * [timestamp, close, volume, open] — because it is the same endpoint; the
- * open position was verified against market-watch on the equity side.
- *
- * Never clobber high/low/change captured live from the /indices page, which
- * the timeseries does not carry.
- */
-async function writeIndexLevelBars(
-  indexCode: string,
-  bars: Array<{ date: string; close: number; open: number | null; volume: number | null }>,
-) {
-  if (bars.length === 0) return;
-  const CHUNK_SIZE = 200;
-  for (let i = 0; i < bars.length; i += CHUNK_SIZE) {
-    const chunk = bars.slice(i, i + CHUNK_SIZE);
-    await db
-      .insert(indexLevels)
-      .values(
-        chunk.map((bar) => ({
-          indexCode,
-          date: bar.date,
-          current: bar.close,
-          open: bar.open,
-          volume: bar.volume,
-        })),
-      )
-      .onConflictDoUpdate({
-        target: [indexLevels.indexCode, indexLevels.date],
-        set: {
-          current: sql`excluded.current`,
-          open: sql`coalesce(excluded.open, ${indexLevels.open})`,
-          volume: sql`coalesce(excluded.volume, ${indexLevels.volume})`,
-        },
-      })
-      .run();
-  }
-}
-
-/**
- * EOD bars have no high/low. Never overwrite a richer market-watch row's
- * intraday range — coalesce keeps whatever was already captured.
- */
-async function writeEodBars(
-  symbol: string,
-  bars: Array<{ date: string; close: number; open: number | null; volume: number | null }>,
-) {
-  if (bars.length === 0) return;
-  const CHUNK_SIZE = 200;
-  for (let i = 0; i < bars.length; i += CHUNK_SIZE) {
-    const chunk = bars.slice(i, i + CHUNK_SIZE);
-    await db
-      .insert(quotesDaily)
-      .values(
-        chunk.map((bar) => ({
-          symbol,
-          date: bar.date,
-          open: bar.open,
-          high: null,
-          low: null,
-          close: bar.close,
-          volume: bar.volume,
-          source: "eod" as const,
-        })),
-      )
-      .onConflictDoUpdate({
-        target: [quotesDaily.symbol, quotesDaily.date],
-        set: {
-          close: sql`excluded.close`,
-          volume: sql`coalesce(excluded.volume, ${quotesDaily.volume})`,
-          open: sql`coalesce(excluded.open, ${quotesDaily.open})`,
-        },
-      })
-      .run();
-  }
-}
-
-/** Store a payout row from the PSX payouts fragment. */
-async function writePayout(symbol: string, p: PayoutRow) {
-  await db
-    .insert(payoutsTable)
-    .values({
-      // Keyed on symbol+date+raw so a corrected rate updates in place.
-      id: stableId("payout", symbol, p.date, p.raw),
-      symbol,
-      date: p.date,
-      type: p.kind,
-      percent: p.percent,
-      perShare: p.perShare,
-      period: p.period,
-      instalment: p.instalment,
-      bookClosureFrom: p.bookClosureFrom,
-      bookClosureTo: p.bookClosureTo,
-      raw: p.raw,
-    })
-    .onConflictDoUpdate({
-      target: payoutsTable.id,
-      set: {
-        type: p.kind,
-        percent: p.percent,
-        perShare: p.perShare,
-        period: p.period,
-        instalment: p.instalment,
-        bookClosureFrom: p.bookClosureFrom,
-        bookClosureTo: p.bookClosureTo,
-      },
-    })
-    .run();
 }
 
 /**

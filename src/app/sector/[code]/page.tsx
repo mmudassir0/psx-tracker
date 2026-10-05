@@ -93,7 +93,7 @@ export default async function SectorPage({
               name: c.name,
               value: c.changePct,
               close: c.close,
-              volume: c.volume,
+              volume: c.avgVolume30d,
               weightPct: c.indexWeightPct,
             }))}
           />

@@ -20,7 +20,7 @@ function check(label: string, actual: number, expected: number, tol = 0.01) {
 // --- Backtest metrics (pure arithmetic, no database) ---------------------
 console.log("\n[1] Metrics on a doubling series over exactly one year");
 {
-  const m = computeMetrics([100, 150, 200], 1);
+  const m = computeMetrics([100, 150, 200], 100, 1);
   check("total return %", m.totalReturnPct, 100);
   check("CAGR %", m.cagrPct, 100);
   check("max drawdown %", m.maxDrawdownPct, 0);
@@ -29,21 +29,21 @@ console.log("\n[1] Metrics on a doubling series over exactly one year");
 
 console.log("\n[2] Drawdown is measured peak-to-trough, not start-to-end");
 {
-  const m = computeMetrics([100, 200, 120, 160], 1);
+  const m = computeMetrics([100, 200, 120, 160], 100, 1);
   check("max drawdown %", m.maxDrawdownPct, 40);
   check("total return %", m.totalReturnPct, 60);
 }
 
 console.log("\n[3] CAGR compounds over multiple years");
 {
-  const m = computeMetrics([100, 200, 400], 2);
+  const m = computeMetrics([100, 200, 400], 100, 2);
   check("CAGR %", m.cagrPct, 100);
   check("total return %", m.totalReturnPct, 300);
 }
 
 console.log("\n[4] A flat series has no return, drawdown or volatility");
 {
-  const m = computeMetrics([100, 100, 100, 100], 1);
+  const m = computeMetrics([100, 100, 100, 100], 100, 1);
   check("total return %", m.totalReturnPct, 0);
   check("max drawdown %", m.maxDrawdownPct, 0);
   check("volatility %", m.volatilityPct, 0);
@@ -64,7 +64,7 @@ async function runStrategyTests() {
     DROP TABLE IF EXISTS symbols;
     CREATE TABLE symbols (
       symbol text PRIMARY KEY, name text, sector_code text, sector_name text,
-      indexes text, is_kmi30 integer NOT NULL DEFAULT 0,
+      indexes text, is_kmi30 integer NOT NULL DEFAULT 0, avg_volume_30d real,
       no_company_page integer NOT NULL DEFAULT 0, updated_at integer);
     DROP TABLE IF EXISTS constituents;
     CREATE TABLE constituents (

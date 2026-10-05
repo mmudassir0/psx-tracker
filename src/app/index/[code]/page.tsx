@@ -229,7 +229,7 @@ export default async function IndexPage({
                 name: c.name,
                 value: c.changePct,
                 close: c.close,
-                volume: c.volume,
+                volume: c.avgVolume30d,
                 weightPct: c.indexWeightPct,
               }))}
             />

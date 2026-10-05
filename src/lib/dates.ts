@@ -45,3 +45,30 @@ export function isMarketOpen(now: Date = new Date()): boolean {
   const minutes = pkt.getUTCHours() * 60 + pkt.getUTCMinutes();
   return minutes >= 9 * 60 + 32 && minutes <= 15 * 60 + 30;
 }
+
+function isWeekend(date: string): boolean {
+  const day = pktDateToUtc(date).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+/**
+ * The newest session whose data should be in the database by now. The daily
+ * job runs after the close but GitHub often starts it late, so a weekday only
+ * counts once it is past 18:00 PKT.
+ */
+export function expectedSessionDate(now: Date = new Date()): string {
+  const pkt = new Date(now.getTime() + PKT_OFFSET_MS);
+  let date = todayPkt(now);
+  if (pkt.getUTCHours() < 18) date = addDays(date, -1);
+  while (isWeekend(date)) date = addDays(date, -1);
+  return date;
+}
+
+/** Weekday sessions after `from` up to and including `to`. Holidays count. */
+export function weekdaysBetween(from: string, to: string): number {
+  let n = 0;
+  for (let d = addDays(from, 1); d <= to; d = addDays(d, 1)) {
+    if (!isWeekend(d)) n++;
+  }
+  return n;
+}

@@ -140,8 +140,8 @@ export default async function MoversPage({
       </div>
 
       <Card
-        title="Most active"
-        subtitle="By traded value, not share count — volume alone just surfaces penny stocks"
+        title="Most traded"
+        subtitle="By average traded value over the last 30 sessions — PSX no longer publishes daily volume, so this is not today's activity"
       >
         <TableWrap>
           <table className="w-full text-sm">
@@ -151,8 +151,8 @@ export default async function MoversPage({
                 <Th>Company</Th>
                 <Th align="right">Close</Th>
                 <Th align="right">Change</Th>
-                <Th align="right">Volume</Th>
-                <Th align="right">Traded value</Th>
+                <Th align="right">Avg vol 30D</Th>
+                <Th align="right">Avg value 30D</Th>
               </tr>
             </thead>
             <tbody className="tabular">
@@ -176,10 +176,12 @@ export default async function MoversPage({
                     {pct(r.changePct)}
                   </Td>
                   <Td align="right" className="text-slate-500">
-                    {count(r.volume)}
+                    {count(
+                      r.avgVolume30d == null ? null : Math.round(r.avgVolume30d),
+                    )}
                   </Td>
                   <Td align="right" className="font-medium">
-                    {compactPkr((r.volume ?? 0) * (r.close ?? 0))}
+                    {compactPkr(r.avgTradedValue30d)}
                   </Td>
                 </tr>
               ))}
@@ -272,7 +274,7 @@ function MoverTable({
               <Th>Symbol</Th>
               <Th align="right">Close</Th>
               <Th align="right">Change</Th>
-              <Th align="right">Value</Th>
+              <Th align="right">Avg value 30D</Th>
             </tr>
           </thead>
           <tbody className="tabular">
@@ -293,7 +295,7 @@ function MoverTable({
                   {pct(r.changePct)}
                 </Td>
                 <Td align="right" className="text-slate-500">
-                  {compactPkr((r.volume ?? 0) * (r.close ?? 0))}
+                  {compactPkr(r.avgTradedValue30d)}
                 </Td>
               </tr>
             ))}

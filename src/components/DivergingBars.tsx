@@ -9,6 +9,7 @@ export interface DivergingDatum {
   name: string | null;
   value: number | null;
   close: number | null;
+  /** 30-session average share volume. */
   volume: number | null;
   weightPct: number | null;
 }
@@ -124,9 +125,11 @@ export function DivergingBars({
                     </dt>
                     <dd className="text-right">{pct(d.value)}</dd>
                     <dt className="text-slate-500 dark:text-slate-400">
-                      Volume
+                      Avg vol (30D)
                     </dt>
-                    <dd className="text-right">{count(d.volume)}</dd>
+                    <dd className="text-right">
+                      {count(d.volume == null ? null : Math.round(d.volume))}
+                    </dd>
                     <dt className="text-slate-500 dark:text-slate-400">
                       Index weight
                     </dt>

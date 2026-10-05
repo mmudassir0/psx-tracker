@@ -23,6 +23,11 @@ export const symbols = sqliteTable("symbols", {
   indexes: text("indexes"),
   isKmi30: integer("is_kmi30", { mode: "boolean" }).notNull().default(false),
   /**
+   * 30-session average share volume from /screener. PSX stopped publishing
+   * daily volume, so this is the only liquidity figure still available.
+   */
+  avgVolume30d: real("avg_volume_30d"),
+  /**
    * PSX serves HTTP 500 for /company/{SYMBOL} on some counters (ex-dividend,
    * non-compliant and similar segment listings). Remembering that avoids
    * re-requesting ~40 dead pages, with retries, on every single run.
@@ -34,9 +39,10 @@ export const symbols = sqliteTable("symbols", {
 });
 
 /**
- * Daily OHLCV. `high`/`low` are nullable: the EOD timeseries backfill only
- * carries [close, volume, open], so historical rows have no intraday range.
- * Rows captured live from market-watch have the full set.
+ * Daily OHLCV. Rows up to Sep 2026 came from PSX's EOD timeseries (close,
+ * volume, open). PSX has since withdrawn both that and daily volume, so newer
+ * rows from /screener carry only close and LDCP. `source` keeps the legacy
+ * "market-watch" label for them.
  */
 export const quotesDaily = sqliteTable(
   "quotes_daily",
@@ -134,9 +140,9 @@ export const announcements = sqliteTable(
 /**
  * Cash dividends / bonus / rights.
  *
- * Sourced from PSX's `POST /company/payouts` fragment, which carries the
- * actual declared rate and book-closure dates. Announcement *titles* usually
- * omit the rate, so this endpoint is the only reliable source for it.
+ * Historical rows from PSX's `POST /company/payouts` fragment, which carried
+ * the declared rate and book-closure dates. PSX now refuses that endpoint
+ * (HTTP 403), so this table is no longer refreshed.
  */
 export const payouts = sqliteTable(
   "payouts",

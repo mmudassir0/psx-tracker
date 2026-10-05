@@ -189,15 +189,22 @@ export async function runBacktest(options: BacktestOptions): Promise<BacktestRes
     }
   }
 
+  // Calendar span, not a count of rows: gaps in the price history would
+  // otherwise shorten the period and inflate CAGR.
+  const years =
+    (Date.parse(dates[dates.length - 1]) - Date.parse(dates[0])) /
+    (365.25 * 86_400_000);
+
   const strategyMetrics = computeMetrics(
     points.map((p) => p.strategy),
     initialCapital,
+    years,
   );
 
   const benchValues = points.map((p) => p.benchmark).filter((v): v is number => v != null);
   const benchmarkMetrics =
     benchValues.length === points.length
-      ? computeMetrics(benchValues, initialCapital)
+      ? computeMetrics(benchValues, initialCapital, years)
       : null;
 
   return {
@@ -226,13 +233,13 @@ function emptyMetrics(): BacktestMetrics {
 export function computeMetrics(
   series: number[],
   initialCapital: number,
+  years: number,
 ): BacktestMetrics {
   if (series.length < 2) return emptyMetrics();
 
   const finalValue = series[series.length - 1];
   const totalReturnPct = ((finalValue - initialCapital) / initialCapital) * 100;
 
-  const years = series.length / 252;
   const cagrPct =
     years > 0 && finalValue > 0
       ? (Math.pow(finalValue / initialCapital, 1 / years) - 1) * 100

@@ -30,6 +30,10 @@ export interface ConstituentView {
   high: number | null;
   low: number | null;
   volume: number | null;
+  /** PSX's 30-session average share volume (daily volume is no longer published). */
+  avgVolume30d: number | null;
+  /** avgVolume30d × close: average PKR traded per session. */
+  avgTradedValue30d: number | null;
   changePct: number | null;
   peTtm: number | null;
   marketCap: number | null;
@@ -132,6 +136,8 @@ export async function buildView(
       ? ((close - ldcp) / ldcp) * 100
       : null;
 
+  const avgVolume30d = meta?.avgVolume30d ?? null;
+
   const freeFloatCap =
     close != null && stats?.freeFloatShares != null
       ? close * stats.freeFloatShares
@@ -169,6 +175,9 @@ export async function buildView(
     high: quote?.high ?? null,
     low: quote?.low ?? null,
     volume: quote?.volume ?? null,
+    avgVolume30d,
+    avgTradedValue30d:
+      avgVolume30d != null && close != null ? avgVolume30d * close : null,
     changePct,
     peTtm: stats?.peTtm ?? null,
     marketCap: stats?.marketCap ?? null,
@@ -606,11 +615,9 @@ export async function getMovers(
   const withChange = rows.filter((r) => r.changePct != null);
 
   const byValue = rows
-    .filter((r) => r.volume != null && r.close != null)
-    .map((r) => ({ row: r, value: (r.volume ?? 0) * (r.close ?? 0) }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, limit)
-    .map((x) => x.row);
+    .filter((r) => r.avgTradedValue30d != null)
+    .sort((a, b) => (b.avgTradedValue30d ?? 0) - (a.avgTradedValue30d ?? 0))
+    .slice(0, limit);
 
   return {
     gainers: [...withChange]

@@ -133,8 +133,12 @@ export default async function HealthPage() {
     .select()
     .from(ingestRuns)
     .orderBy(sql`${ingestRuns.startedAt} desc`)
-    .limit(8)
+    .limit(15)
     .all();
+
+  // The daily GitHub Actions job is the only writer in production, so its
+  // last outcome is the number that says whether the data can be trusted.
+  const lastScheduled = runs.find((r) => r.trigger === "schedule") ?? null;
 
   return (
     <div className="flex flex-col gap-5">
@@ -144,7 +148,21 @@ export default async function HealthPage() {
         actions={<IngestButton />}
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <StatTile
+          label="Daily job"
+          value={relativeTime(lastScheduled?.startedAt)}
+          hint={
+            lastScheduled ? (
+              <Badge tone={runTone(runStatus(lastScheduled))}>
+                {runStatus(lastScheduled)}
+              </Badge>
+            ) : (
+              "no scheduled run in the last 15"
+            )
+          }
+          large
+        />
         <StatTile
           label="Last ingest"
           value={relativeTime(lastIngest?.startedAt)}
@@ -372,12 +390,17 @@ export default async function HealthPage() {
         </Card>
       )}
 
-      <Card title="Recent ingest runs">
+      <Card
+        title="Recent ingest runs"
+        subtitle="Times in PKT. The daily job runs on weekdays around 4–6 PM; an interrupted run stopped without recording a result."
+      >
         <TableWrap>
           <table className="w-full text-sm">
             <thead>
               <tr>
                 <Th>Started</Th>
+                <Th>Source</Th>
+                <Th align="right">Took</Th>
                 <Th>Status</Th>
                 <Th>Detail</Th>
               </tr>
@@ -387,21 +410,21 @@ export default async function HealthPage() {
                 <tr key={r.id}>
                   <Td className="tabular whitespace-nowrap">
                     {r.startedAt
-                      ? new Date(r.startedAt).toLocaleString("en-GB")
+                      ? new Date(r.startedAt).toLocaleString("en-GB", {
+                          timeZone: "Asia/Karachi",
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })
                       : "—"}
                   </Td>
+                  <Td className="whitespace-nowrap text-slate-600 dark:text-slate-400">
+                    {TRIGGER_LABELS[r.trigger ?? "cli"] ?? r.trigger}
+                  </Td>
+                  <Td align="right" className="tabular whitespace-nowrap text-slate-500">
+                    {duration(r.startedAt, r.finishedAt)}
+                  </Td>
                   <Td>
-                    <Badge
-                      tone={
-                        r.status === "ok"
-                          ? "good"
-                          : r.status === "error"
-                            ? "critical"
-                            : "neutral"
-                      }
-                    >
-                      {r.status}
-                    </Badge>
+                    <Badge tone={runTone(runStatus(r))}>{runStatus(r)}</Badge>
                   </Td>
                   <Td className="max-w-[520px] truncate text-slate-500">
                     {r.detail ?? "—"}
@@ -414,6 +437,42 @@ export default async function HealthPage() {
       </Card>
     </div>
   );
+}
+
+const TRIGGER_LABELS: Record<string, string> = {
+  schedule: "Daily job",
+  cli: "Manual (CLI)",
+  ui: "Refresh button",
+};
+
+/** A run still marked running after this long died without recording a result. */
+const INTERRUPTED_AFTER_MS = 60 * 60 * 1000;
+
+function runStatus(r: {
+  status: string | null;
+  startedAt: Date | null;
+}): string {
+  if (
+    r.status === "running" &&
+    r.startedAt &&
+    Date.now() - new Date(r.startedAt).getTime() > INTERRUPTED_AFTER_MS
+  ) {
+    return "interrupted";
+  }
+  return r.status ?? "—";
+}
+
+function runTone(status: string): "good" | "critical" | "warning" | "neutral" {
+  if (status === "ok") return "good";
+  if (status === "error") return "critical";
+  if (status === "interrupted") return "warning";
+  return "neutral";
+}
+
+function duration(start: Date | null, end: Date | null): string {
+  if (!start || !end) return "—";
+  const s = Math.round((new Date(end).getTime() - new Date(start).getTime()) / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 function Row({ label, value }: { label: string; value: string }) {
