@@ -6,10 +6,15 @@ import { assertScratchDatabase } from "./test-guard";
 console.log(`Using scratch database: ${assertScratchDatabase()}`);
 
 db.$client.exec(`
+  DROP TABLE IF EXISTS portfolios;
+  CREATE TABLE portfolios (
+    id text PRIMARY KEY, user_id text NOT NULL, name text NOT NULL, created_at integer NOT NULL
+  );
   DROP TABLE IF EXISTS transactions;
   CREATE TABLE transactions (
     id text PRIMARY KEY,
     user_id text,
+    portfolio_id text,
     symbol text NOT NULL,
     date text NOT NULL,
     type text NOT NULL,

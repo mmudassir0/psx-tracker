@@ -8,8 +8,25 @@ import { auth, getCurrentUser, getCurrentUserId } from "@/lib/auth";
 import {
   addTransaction,
   deleteTransaction,
+  getHoldings,
+  importTransactions,
+  moveTransaction,
   type TransactionType,
 } from "@/lib/portfolio";
+import {
+  IMPORT_FIELDS,
+  MAX_IMPORT_ROWS,
+  normaliseRow,
+  parseCsv,
+  type ColumnMapping,
+  type DateOrder,
+  type ImportedTx,
+} from "@/lib/csv-import";
+import {
+  createPortfolio,
+  deletePortfolio,
+  renamePortfolio,
+} from "@/lib/portfolios";
 import {
   createAlert,
   deleteAlert,
@@ -25,6 +42,14 @@ import { ingestRuns, watchlist } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { setUserSetting } from "@/lib/settings";
 import { notifyAlerts } from "@/lib/notify";
+import {
+  createTelegramLink,
+  deliverAlerts,
+  sendTelegram,
+  telegramConfigured,
+  updateNotifySettings,
+  getNotifySettingsFor,
+} from "@/lib/user-notify";
 import {
   recordScreenHits,
   createCustomScreen,
@@ -99,6 +124,7 @@ export async function addTransactionAction(
     price: input.price,
     fees: input.fees,
     note: input.note ?? undefined,
+    portfolioId: String(formData.get("portfolioId") ?? "") || null,
   });
 
   revalidatePath("/portfolio");
@@ -359,7 +385,9 @@ export async function startIngestAction(
       try {
         await recordScreenHits();
         // Every user's alerts, as the daily job does.
-        notifyAlerts(await evaluateAlerts());
+        const fired = await evaluateAlerts();
+        notifyAlerts(fired);
+        await deliverAlerts(fired);
       } catch {
       }
     })
@@ -500,4 +528,235 @@ export async function logoutAction() {
   await auth.api.signOut({ headers: await headers() });
   revalidatePath("/", "layout");
   redirect("/");
+}
+
+export async function createPortfolioAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
+  const result = await createPortfolio(userId, String(formData.get("name") ?? ""));
+  if (!result.ok) return { ok: false, message: result.message };
+  revalidatePath("/portfolio");
+  redirect(`/portfolio?p=${result.id}`);
+}
+
+export async function renamePortfolioAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
+  const result = await renamePortfolio(
+    userId,
+    String(formData.get("portfolioId") ?? ""),
+    String(formData.get("name") ?? ""),
+  );
+  revalidatePath("/portfolio");
+  return result;
+}
+
+export async function deletePortfolioAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
+  const result = await deletePortfolio(userId, String(formData.get("portfolioId") ?? ""));
+  if (!result.ok) return result;
+  revalidatePath("/portfolio");
+  redirect("/portfolio");
+}
+
+export async function moveTransactionAction(formData: FormData) {
+  const userId = await userIdOrThrow();
+  const id = String(formData.get("id") ?? "");
+  const portfolioId = String(formData.get("portfolioId") ?? "");
+  if (id && portfolioId) await moveTransaction(userId, id, portfolioId);
+  revalidatePath("/portfolio");
+}
+
+const dividendSchema = z.object({
+  symbol: z.string().trim().min(1, "Pick a symbol").max(20).transform((s) => s.toUpperCase()),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date"),
+  perShare: z.coerce.number().positive("Enter the dividend per share"),
+  quantity: z.union([z.literal(""), z.coerce.number().positive()]).optional(),
+  taxMode: z.enum(["filer", "nonfiler", "none", "custom"]),
+  taxAmount: z.union([z.literal(""), z.coerce.number().min(0)]).optional(),
+});
+
+/** Withholding tax on dividends in Pakistan: 15% for filers, 30% otherwise. */
+const DIVIDEND_TAX_RATE = { filer: 0.15, nonfiler: 0.3, none: 0 } as const;
+
+export async function recordDividendAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
+  const parsed = dividendSchema.safeParse({
+    symbol: formData.get("symbol"),
+    date: formData.get("date"),
+    perShare: formData.get("perShare"),
+    quantity: formData.get("quantity") ?? "",
+    taxMode: formData.get("taxMode"),
+    taxAmount: formData.get("taxAmount") ?? "",
+  });
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid dividend" };
+  }
+  const { symbol, date, perShare, taxMode } = parsed.data;
+  const portfolioId = String(formData.get("portfolioId") ?? "") || null;
+
+  // Blank quantity: what this portfolio held on that date.
+  let quantity = typeof parsed.data.quantity === "number" ? parsed.data.quantity : 0;
+  if (!quantity) {
+    const held = await getHoldings(userId, { portfolioId, asOf: date });
+    quantity = held.find((h) => h.symbol === symbol)?.quantity ?? 0;
+    if (quantity <= 0) {
+      return { ok: false, message: `You held no ${symbol} on ${date}. Enter the number of shares.` };
+    }
+  }
+
+  const gross = quantity * perShare;
+  const tax =
+    taxMode === "custom"
+      ? typeof parsed.data.taxAmount === "number"
+        ? parsed.data.taxAmount
+        : 0
+      : Math.round(gross * DIVIDEND_TAX_RATE[taxMode] * 100) / 100;
+  if (tax > gross) return { ok: false, message: "Tax withheld can't be more than the dividend." };
+
+  await addTransaction(userId, {
+    symbol,
+    date,
+    type: "dividend",
+    quantity,
+    price: perShare,
+    fees: tax,
+    portfolioId,
+  });
+
+  revalidatePath("/portfolio");
+  return {
+    ok: true,
+    message: `Recorded ${symbol} dividend: ${quantity} × ${perShare} = ${gross.toFixed(2)}, tax ${tax.toFixed(2)}, net ${(gross - tax).toFixed(2)}`,
+  };
+}
+
+export interface ImportState extends ActionState {
+  imported?: number;
+  skipped?: number;
+  rejected?: number;
+}
+
+/**
+ * The browser sends the raw CSV plus the column mapping it previewed; rows
+ * are parsed again here with the same functions, so nothing the client
+ * computed is trusted.
+ */
+export async function importTransactionsAction(
+  _prev: ImportState,
+  formData: FormData,
+): Promise<ImportState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
+
+  const text = String(formData.get("csv") ?? "");
+  if (text.length > 2_000_000) return { ok: false, message: "That file is too large (2 MB max)." };
+
+  let mapping: ColumnMapping;
+  try {
+    mapping = JSON.parse(String(formData.get("mapping") ?? "{}")) as ColumnMapping;
+  } catch {
+    return { ok: false, message: "Invalid column mapping." };
+  }
+  const order: DateOrder = formData.get("dateOrder") === "mdy" ? "mdy" : "dmy";
+  const hasHeader = formData.get("hasHeader") !== "false";
+
+  const rows = parseCsv(text).slice(hasHeader ? 1 : 0);
+  if (rows.length === 0) return { ok: false, message: "No rows found." };
+  if (rows.length > MAX_IMPORT_ROWS) {
+    return { ok: false, message: `Up to ${MAX_IMPORT_ROWS} rows per import; split the file.` };
+  }
+  for (const field of IMPORT_FIELDS) {
+    if (field.required && !(Number.isInteger(mapping[field.key]) && mapping[field.key] >= 0)) {
+      return { ok: false, message: `Choose which column holds "${field.label}".` };
+    }
+  }
+
+  const valid: ImportedTx[] = [];
+  for (const row of rows) {
+    const result = normaliseRow(row, mapping, order);
+    if (result.ok) valid.push(result.tx);
+  }
+  const rejected = rows.length - valid.length;
+  if (valid.length === 0) return { ok: false, message: "None of the rows could be read.", rejected };
+
+  const { imported, skipped } = await importTransactions(
+    userId,
+    String(formData.get("portfolioId") ?? "") || null,
+    valid,
+  );
+  revalidatePath("/portfolio");
+  return {
+    ok: true,
+    message:
+      `Imported ${imported} transaction${imported === 1 ? "" : "s"}` +
+      (skipped ? `, skipped ${skipped} already recorded` : "") +
+      (rejected ? `, ${rejected} unreadable row${rejected === 1 ? "" : "s"} left out` : "") +
+      ".",
+    imported,
+    skipped,
+    rejected,
+  };
+}
+
+export interface TelegramLinkState extends ActionState {
+  link?: string;
+}
+
+/** A one-time t.me link; opening it in Telegram links that chat to you. */
+export async function telegramLinkAction(): Promise<TelegramLinkState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
+  if (!telegramConfigured()) return { ok: false, message: "Telegram isn't set up on this site." };
+  return {
+    ok: true,
+    message: "Open this link on the device where you use Telegram and press Start. It works once, for 15 minutes.",
+    link: await createTelegramLink(userId),
+  };
+}
+
+export async function disconnectTelegramAction() {
+  const userId = await userIdOrThrow();
+  await updateNotifySettings(userId, { telegramChatId: null });
+  revalidatePath("/account");
+}
+
+export async function testTelegramAction(): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
+  const { telegramChatId } = await getNotifySettingsFor(userId);
+  if (!telegramChatId) return { ok: false, message: "Telegram isn't connected." };
+  const ok = await sendTelegram(telegramChatId, "Test from PSX Tracker: alerts will arrive here.");
+  return ok ? { ok: true, message: "Sent. Check Telegram." } : { ok: false, message: "Telegram didn't accept the message." };
+}
+
+export async function setEmailAlertsAction(formData: FormData) {
+  const userId = await userIdOrThrow();
+  const user = await getCurrentUser();
+  const enable = formData.get("enabled") === "true";
+  // Only a verified address can receive alerts, or anyone could make the
+  // site email a stranger by signing up with their address.
+  if (enable && !user?.emailVerified) throw new Error("Verify your email first.");
+  await updateNotifySettings(userId, { email: enable });
+  revalidatePath("/account");
+}
+
+export async function dismissOnboardingAction() {
+  const userId = await userIdOrThrow();
+  await setUserSetting(userId, "onboarding", { dismissed: true });
+  revalidatePath("/");
 }

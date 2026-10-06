@@ -14,7 +14,16 @@ const TYPE_HINTS: Record<string, string> = {
   rights: "Quantity = shares subscribed, price = subscription price.",
 };
 
-export function TransactionForm({ symbols }: { symbols: string[] }) {
+export function TransactionForm({
+  symbols,
+  portfolios = [],
+  defaultPortfolioId,
+}: {
+  symbols: string[];
+  /** The user's portfolios; a picker shows when there is more than one. */
+  portfolios?: { id: string; name: string }[];
+  defaultPortfolioId?: string;
+}) {
   const [state, formAction, pending] = useActionState(
     addTransactionAction,
     INITIAL,
@@ -24,6 +33,25 @@ export function TransactionForm({ symbols }: { symbols: string[] }) {
   return (
     <form action={formAction} className="flex flex-col gap-3">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {portfolios.length > 1 ? (
+          <Field label="Portfolio">
+            <select
+              name="portfolioId"
+              defaultValue={defaultPortfolioId ?? portfolios[0].id}
+              className={inputClass}
+            >
+              {portfolios.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : (
+          defaultPortfolioId && (
+            <input type="hidden" name="portfolioId" value={defaultPortfolioId} />
+          )
+        )}
         <Field label="Symbol">
           <input
             name="symbol"

@@ -9,8 +9,18 @@ import {
   addTransaction,
   deleteTransaction,
   getHoldings,
+  importTransactions,
   listTransactions,
+  moveTransaction,
 } from "@/lib/portfolio";
+import {
+  createPortfolio,
+  deletePortfolio,
+  ensureDefaultPortfolio,
+  listPortfolios,
+  renamePortfolio,
+} from "@/lib/portfolios";
+import { deleteUserData, exportUserData } from "@/lib/account-data";
 import { computeDisposals } from "@/lib/cgt";
 import {
   acknowledgeEvent,
@@ -36,7 +46,7 @@ console.log(`Using scratch database: ${assertScratchDatabase()}`);
 db.$client.exec(`
   DROP TABLE IF EXISTS transactions;
   CREATE TABLE transactions (
-    id text PRIMARY KEY, user_id text, symbol text NOT NULL, date text NOT NULL,
+    id text PRIMARY KEY, user_id text, portfolio_id text, symbol text NOT NULL, date text NOT NULL,
     type text NOT NULL, quantity real NOT NULL DEFAULT 0, price real NOT NULL DEFAULT 0,
     fees real NOT NULL DEFAULT 0, note text, created_at integer NOT NULL);
   DROP TABLE IF EXISTS alerts;
@@ -56,6 +66,16 @@ db.$client.exec(`
   CREATE TABLE screen_hits (
     screen_id text NOT NULL, date text NOT NULL, symbol text NOT NULL,
     PRIMARY KEY (screen_id, date, symbol));
+  DROP TABLE IF EXISTS portfolios;
+  CREATE TABLE portfolios (
+    id text PRIMARY KEY, user_id text NOT NULL, name text NOT NULL, created_at integer NOT NULL);
+  DROP TABLE IF EXISTS watchlist;
+  CREATE TABLE watchlist (
+    user_id text NOT NULL, symbol text NOT NULL, note text, added_price real,
+    added_at integer NOT NULL, PRIMARY KEY (user_id, symbol));
+  DROP TABLE IF EXISTS link_codes;
+  CREATE TABLE link_codes (
+    code text PRIMARY KEY, user_id text NOT NULL, purpose text NOT NULL, expires_at integer NOT NULL);
   DROP TABLE IF EXISTS user_settings;
   CREATE TABLE user_settings (
     user_id text NOT NULL, key text NOT NULL, value text NOT NULL,
@@ -132,11 +152,66 @@ async function run() {
   await deleteCustomScreen(BOB, aliceScreen);
   check("bob can't delete it", (await listCustomScreens(ALICE)).length, 1);
 
-  console.log("\n[5] Settings");
+  console.log("\n[5] Portfolios");
+  const aliceMain = await ensureDefaultPortfolio(ALICE);
+  check("default portfolio is reused", await ensureDefaultPortfolio(ALICE), aliceMain);
+  const trading = await createPortfolio(ALICE, "Trading");
+  check("alice creates a second portfolio", trading.ok, true);
+  const tradingId = trading.ok ? trading.id : "";
+  check("duplicate names refused", (await createPortfolio(ALICE, "trading")).ok, false);
+  check("bob sees only his own portfolio", (await listPortfolios(BOB)).length, 1);
+
+  // Bob can't file a trade into alice's portfolio: it lands in his own default.
+  await addTransaction(BOB, { symbol: "OGDC", date: "2026-02-01", type: "buy", quantity: 5, price: 280, portfolioId: tradingId });
+  const bobDefault = await ensureDefaultPortfolio(BOB);
+  check("bob's trade went to his own portfolio",
+    (await listTransactions(BOB)).find((t) => t.symbol === "OGDC")?.portfolioId, bobDefault);
+  check("alice's Trading portfolio stays empty", (await listTransactions(ALICE, { portfolioId: tradingId })).length, 0);
+
+  const ogdc = await addTransaction(ALICE, { symbol: "OGDC", date: "2026-02-02", type: "buy", quantity: 20, price: 280, portfolioId: tradingId });
+  check("per-portfolio holdings", (await getHoldings(ALICE, { portfolioId: tradingId })).map((h) => h.symbol), ["OGDC"]);
+  check("combined holdings span portfolios", (await getHoldings(ALICE)).map((h) => h.symbol).sort(), ["MEBL", "OGDC"]);
+  check("holdings as of a date", (await getHoldings(ALICE, { asOf: "2026-01-31" })).map((h) => h.symbol), []);
+
+  await moveTransaction(BOB, ogdc, bobDefault);
+  check("bob can't move alice's trade", (await listTransactions(ALICE, { portfolioId: tradingId })).length, 1);
+  check("bob can't rename alice's portfolio", (await renamePortfolio(BOB, tradingId, "Mine")).ok, false);
+  check("a non-empty portfolio can't be deleted", (await deletePortfolio(ALICE, tradingId)).ok, false);
+  await moveTransaction(ALICE, ogdc, aliceMain);
+  check("alice moves her trade", (await listTransactions(ALICE, { portfolioId: aliceMain })).some((t) => t.id === ogdc), true);
+  check("an empty portfolio can be deleted", (await deletePortfolio(ALICE, tradingId)).ok, true);
+  check("the last portfolio can't be deleted", (await deletePortfolio(ALICE, aliceMain)).ok, false);
+
+  console.log("\n[6] Import");
+  const rows = [
+    { date: "2026-03-01", symbol: "LUCK", type: "buy" as const, quantity: 10, price: 400, fees: 5, note: null },
+    { date: "2026-03-01", symbol: "LUCK", type: "buy" as const, quantity: 10, price: 400, fees: 5, note: null },
+    { date: "2026-03-05", symbol: "LUCK", type: "sell" as const, quantity: 4, price: 420, fees: 3, note: "trim" },
+  ];
+  check("duplicates inside the file are skipped", await importTransactions(ALICE, aliceMain, rows), { imported: 2, skipped: 1 });
+  check("re-importing the same file adds nothing", await importTransactions(ALICE, aliceMain, rows), { imported: 0, skipped: 3 });
+  await importTransactions(BOB, aliceMain, rows.slice(2));
+  check("import into someone else's portfolio lands in your own",
+    (await listTransactions(BOB)).filter((t) => t.symbol === "LUCK").map((t) => t.portfolioId), [bobDefault]);
+
+  console.log("\n[7] Settings");
   await setUserSetting(ALICE, "zakat", { otherAssets: 5000 });
   check("alice reads her setting", (await getUserSetting(ALICE, "zakat", { otherAssets: 0 })).otherAssets, 5000);
   check("bob gets the default", (await getUserSetting(BOB, "zakat", { otherAssets: 0 })).otherAssets, 0);
   check("logged out gets the default", (await getUserSetting(null, "zakat", { otherAssets: 0 })).otherAssets, 0);
+
+  console.log("\n[8] Export and delete");
+  const aliceExport = await exportUserData(ALICE);
+  check("export has only alice's trades", aliceExport.transactions.every((t) => t.userId === ALICE), true);
+  check("export includes her portfolio", aliceExport.portfolios.length, 1);
+  check("export includes her alert", aliceExport.alerts.length, 1);
+  const bobBefore = (await listTransactions(BOB)).length;
+  await deleteUserData(ALICE);
+  const gone = await exportUserData(ALICE);
+  check("alice's data is gone",
+    [gone.transactions.length, gone.portfolios.length, gone.alerts.length, gone.alertEvents.length, gone.customScreens.length, Object.keys(gone.settings).length],
+    [0, 0, 0, 0, 0, 0]);
+  check("bob's data is untouched", (await listTransactions(BOB)).length, bobBefore);
 }
 
 run()

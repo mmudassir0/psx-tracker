@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+import { Turnstile } from "@/components/Turnstile";
 
 /** A dropped connection rejects instead of returning an error; treat it as one. */
 const NETWORK_ERROR = {
@@ -118,10 +119,21 @@ export function LoginForm({ next, google }: { next: string; google: boolean }) {
   );
 }
 
-export function SignupForm({ next, google }: { next: string; google: boolean }) {
+export function SignupForm({
+  next,
+  google,
+  captchaSiteKey,
+}: {
+  next: string;
+  google: boolean;
+  /** Cloudflare Turnstile site key, when bot protection is on. */
+  captchaSiteKey?: string;
+}) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaRound, setCaptchaRound] = useState(0);
 
   return (
     <div className="flex flex-col gap-3">
@@ -141,14 +153,27 @@ export function SignupForm({ next, google }: { next: string; google: boolean }) 
           }
           setPending(true);
           setError(null);
-          const { error } = await authClient.signUp.email({
-            name: String(form.get("name") ?? "").trim(),
-            email: String(form.get("email") ?? "").trim(),
-            password,
-          }).catch(() => NETWORK_ERROR);
+          if (captchaSiteKey && !captchaToken) {
+            setError("Please complete the check below first.");
+            setPending(false);
+            return;
+          }
+          const { error } = await authClient.signUp.email(
+            {
+              name: String(form.get("name") ?? "").trim(),
+              email: String(form.get("email") ?? "").trim(),
+              password,
+            },
+            captchaToken ? { headers: { "x-captcha-response": captchaToken } } : undefined,
+          ).catch(() => NETWORK_ERROR);
           if (error) {
             setError(describe(error));
             setPending(false);
+            // A Turnstile token is single-use: get a fresh one for the retry.
+            if (captchaSiteKey) {
+              setCaptchaToken(null);
+              setCaptchaRound((n) => n + 1);
+            }
             return;
           }
           router.replace(next);
@@ -171,11 +196,21 @@ export function SignupForm({ next, google }: { next: string; google: boolean }) 
           <span className="text-xs text-slate-500 dark:text-slate-400">Repeat password</span>
           <input name="confirm" type="password" required minLength={10} maxLength={128} autoComplete="new-password" className={inputClass} />
         </label>
-        <button type="submit" disabled={pending} className={buttonClass}>
+        {captchaSiteKey && (
+          <Turnstile siteKey={captchaSiteKey} onToken={setCaptchaToken} resetKey={captchaRound} />
+        )}
+        <button type="submit" disabled={pending || Boolean(captchaSiteKey && !captchaToken)} className={buttonClass}>
           {pending ? "Creating account…" : "Create account"}
         </button>
         {error && <p role="alert" className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}
       </form>
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        By creating an account you agree to how your data is handled in the{" "}
+        <Link href="/privacy" className="underline">
+          privacy note
+        </Link>
+        .
+      </p>
       <p className="text-sm text-slate-600 dark:text-slate-400">
         Already have an account?{" "}
         <Link href={`/login?next=${encodeURIComponent(next)}`} className="underline">

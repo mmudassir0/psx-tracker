@@ -180,6 +180,8 @@ export const transactions = sqliteTable(
     id: text("id").primaryKey(),
     /** Owner. Null only for rows from before accounts, until claimed. */
     userId: text("user_id"),
+    /** Which of the owner's portfolios this belongs to (see `portfolios`). */
+    portfolioId: text("portfolio_id"),
     symbol: text("symbol").notNull(),
     date: text("date").notNull(),
     type: text("type", {
@@ -196,8 +198,35 @@ export const transactions = sqliteTable(
   (t) => [
     index("transactions_symbol_idx").on(t.symbol),
     index("transactions_user_idx").on(t.userId),
+    index("transactions_portfolio_idx").on(t.portfolioId),
   ],
 );
+
+/**
+ * A user's named portfolios ("Long-term", "Trading", a family member's).
+ * Tax and zakat pages combine them, since both are per person.
+ */
+export const portfolios = sqliteTable(
+  "portfolios",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [index("portfolios_user_idx").on(t.userId)],
+);
+
+/**
+ * Short-lived one-time codes, e.g. linking a Telegram chat: the user opens
+ * t.me/<bot>?start=<code> and the bot's webhook redeems it.
+ */
+export const linkCodes = sqliteTable("link_codes", {
+  code: text("code").primaryKey(),
+  userId: text("user_id").notNull(),
+  purpose: text("purpose").notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+});
 
 /** User-defined alert rules, evaluated after each ingest. */
 export const alerts = sqliteTable("alerts", {

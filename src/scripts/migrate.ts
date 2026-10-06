@@ -1,11 +1,12 @@
 /**
- * One-off, idempotent migration to user accounts. Safe to run repeatedly:
- * it only creates what is missing.
+ * Idempotent schema migration for an existing database. Safe to run
+ * repeatedly: it only creates what is missing.
  *
- *   npm run migrate:accounts
+ *   npm run migrate
  *
  * Adds the Better Auth tables, a user_id owner column on every personal
- * table, per-user settings, and the 30-day volume column. The watchlist's key
+ * table, per-user settings, the 30-day volume column, multiple portfolios per
+ * user (existing trades go into a "Main" portfolio), and one-time link codes. The watchlist's key
  * changes from (symbol) to (user_id, symbol), which SQLite can only do by
  * rebuilding the table; its rows are copied across.
  *
@@ -17,6 +18,7 @@
  */
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
+import { ensureDefaultPortfolio } from "@/lib/portfolios";
 
 async function exec(statement: string) {
   await db.run(sql.raw(statement));
@@ -136,6 +138,36 @@ async function main() {
 
   console.log("30-day volume column…");
   await addColumn("symbols", "avg_volume_30d", "real");
+
+  console.log("Portfolios…");
+  await exec(`create table if not exists "portfolios" (
+    "id" text PRIMARY KEY NOT NULL,
+    "user_id" text NOT NULL,
+    "name" text NOT NULL,
+    "created_at" integer NOT NULL
+  )`);
+  await exec(`create index if not exists "portfolios_user_idx" on "portfolios" ("user_id")`);
+  await addColumn("transactions", "portfolio_id", "text");
+  await exec(`create index if not exists "transactions_portfolio_idx" on "transactions" ("portfolio_id")`);
+  // Every owned trade without a portfolio goes into its owner's default one.
+  const owners = (await db.all(
+    sql.raw(`select distinct user_id from "transactions" where user_id is not null and portfolio_id is null`),
+  )) as { user_id: string }[];
+  for (const { user_id } of owners) {
+    const portfolioId = await ensureDefaultPortfolio(user_id);
+    await db.run(
+      sql`update "transactions" set portfolio_id = ${portfolioId} where user_id = ${user_id} and portfolio_id is null`,
+    );
+  }
+  if (owners.length) console.log(`  moved trades of ${owners.length} user(s) into their default portfolio`);
+
+  console.log("Link codes…");
+  await exec(`create table if not exists "link_codes" (
+    "code" text PRIMARY KEY NOT NULL,
+    "user_id" text NOT NULL,
+    "purpose" text NOT NULL,
+    "expires_at" integer NOT NULL
+  )`);
 
   console.log("Done.");
 }

@@ -12,7 +12,7 @@ export function proxy(request: NextRequest) {
 
   const { pathname, search } = request.nextUrl;
   if (pathname.startsWith("/api/")) {
-    return new NextResponse("Log in to download this file.", { status: 401 });
+    return new NextResponse("Log in first.", { status: 401 });
   }
   const login = new URL("/login", request.url);
   login.searchParams.set("next", pathname + search);
@@ -32,5 +32,6 @@ export const config = {
     "/screens/new",
     "/screens/:id/edit",
     "/api/cgt.csv",
+    "/api/export",
   ],
 };

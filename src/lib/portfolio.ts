@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, lte, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { transactions } from "@/db/schema";
 import { getConstituents, type ConstituentView } from "@/lib/market";
+import { ensureDefaultPortfolio, ownsPortfolio } from "@/lib/portfolios";
+import { txKey, type ImportedTx } from "@/lib/csv-import";
 
 export type TransactionType = "buy" | "sell" | "dividend" | "bonus" | "rights";
 
@@ -58,15 +60,35 @@ export interface PortfolioSummary {
 }
 
 /**
+ * Which slice of a user's ledger to read. `portfolioId` omitted (or null)
+ * means every portfolio combined; `asOf` limits to trades up to that date.
+ */
+export interface LedgerScope {
+  portfolioId?: string | null;
+  asOf?: string;
+}
+
+function ledgerWhere(userId: string, scope: LedgerScope = {}): SQL | undefined {
+  return and(
+    eq(transactions.userId, userId),
+    scope.portfolioId ? eq(transactions.portfolioId, scope.portfolioId) : undefined,
+    scope.asOf ? lte(transactions.date, scope.asOf) : undefined,
+  );
+}
+
+/**
  * Every personal function takes the owner's id explicitly. Pages and actions
  * resolve it from the session; a null id (logged out) means an empty ledger.
  */
-export async function getHoldings(userId: string | null): Promise<Holding[]> {
+export async function getHoldings(
+  userId: string | null,
+  scope: LedgerScope = {},
+): Promise<Holding[]> {
   if (!userId) return [];
   const ledger = await db
     .select()
     .from(transactions)
-    .where(eq(transactions.userId, userId))
+    .where(ledgerWhere(userId, scope))
     .orderBy(asc(transactions.date), asc(transactions.createdAt))
     .all();
 
@@ -128,8 +150,9 @@ export async function getHoldings(userId: string | null): Promise<Holding[]> {
 /** Holdings joined with live prices, index weights and concentration analysis. */
 export async function getPortfolio(
   userId: string | null,
+  scope: LedgerScope = {},
 ): Promise<PortfolioSummary> {
-  const holdings = await getHoldings(userId);
+  const holdings = await getHoldings(userId, scope);
   const constituents = await getConstituents();
   const bySymbol = new Map<string, ConstituentView>(
     constituents.map((c) => [c.symbol, c]),
@@ -257,12 +280,15 @@ export async function getPortfolio(
   };
 }
 
-export async function listTransactions(userId: string | null) {
+export async function listTransactions(
+  userId: string | null,
+  scope: LedgerScope = {},
+) {
   if (!userId) return [];
   return await db
     .select()
     .from(transactions)
-    .where(eq(transactions.userId, userId))
+    .where(ledgerWhere(userId, scope))
     .orderBy(desc(transactions.date), desc(transactions.createdAt))
     .all();
 }
@@ -275,13 +301,20 @@ export async function addTransaction(userId: string, input: {
   price: number;
   fees?: number;
   note?: string;
+  /** One of the user's portfolios; anything else falls back to the default. */
+  portfolioId?: string | null;
 }) {
+  const portfolioId =
+    input.portfolioId && (await ownsPortfolio(userId, input.portfolioId))
+      ? input.portfolioId
+      : await ensureDefaultPortfolio(userId);
   const id = randomUUID();
   await db
     .insert(transactions)
     .values({
       id,
       userId,
+      portfolioId,
       symbol: input.symbol.toUpperCase().trim(),
       date: input.date,
       type: input.type,
@@ -301,4 +334,64 @@ export async function deleteTransaction(userId: string, id: string) {
     .delete(transactions)
     .where(and(eq(transactions.id, id), eq(transactions.userId, userId)))
     .run();
+}
+
+/** Move one of the user's trades into another of their portfolios. */
+export async function moveTransaction(userId: string, id: string, portfolioId: string) {
+  if (!(await ownsPortfolio(userId, portfolioId))) return;
+  await db
+    .update(transactions)
+    .set({ portfolioId })
+    .where(and(eq(transactions.id, id), eq(transactions.userId, userId)))
+    .run();
+}
+
+/**
+ * Bulk insert from a CSV import. Rows identical to one already in the target
+ * portfolio (same date, symbol, type, quantity and price) are skipped, so
+ * importing the same statement twice is harmless.
+ */
+export async function importTransactions(
+  userId: string,
+  portfolioId: string | null,
+  rows: ImportedTx[],
+): Promise<{ imported: number; skipped: number }> {
+  const target =
+    portfolioId && (await ownsPortfolio(userId, portfolioId))
+      ? portfolioId
+      : await ensureDefaultPortfolio(userId);
+
+  const existing = new Set(
+    (await listTransactions(userId, { portfolioId: target })).map((t) => txKey(t)),
+  );
+  const fresh: ImportedTx[] = [];
+  for (const row of rows) {
+    const key = txKey(row);
+    if (existing.has(key)) continue;
+    existing.add(key); // also drops duplicates within the file itself
+    fresh.push(row);
+  }
+
+  const createdAt = new Date();
+  for (let i = 0; i < fresh.length; i += 100) {
+    await db
+      .insert(transactions)
+      .values(
+        fresh.slice(i, i + 100).map((row) => ({
+          id: randomUUID(),
+          userId,
+          portfolioId: target,
+          symbol: row.symbol,
+          date: row.date,
+          type: row.type,
+          quantity: row.quantity,
+          price: row.price,
+          fees: row.fees,
+          note: row.note,
+          createdAt,
+        })),
+      )
+      .run();
+  }
+  return { imported: fresh.length, skipped: rows.length - fresh.length };
 }

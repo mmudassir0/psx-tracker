@@ -54,8 +54,11 @@ console.log("\n[4] A flat series has no return, drawdown or volatility");
 async function runStrategyTests() {
   db.$client.exec(`
     DROP TABLE IF EXISTS transactions;
+    DROP TABLE IF EXISTS portfolios;
+    CREATE TABLE portfolios (
+      id text PRIMARY KEY, user_id text NOT NULL, name text NOT NULL, created_at integer NOT NULL);
     CREATE TABLE transactions (
-      id text PRIMARY KEY, user_id text, symbol text NOT NULL, date text NOT NULL, type text NOT NULL,
+      id text PRIMARY KEY, user_id text, portfolio_id text, symbol text NOT NULL, date text NOT NULL, type text NOT NULL,
       quantity real NOT NULL DEFAULT 0, price real NOT NULL DEFAULT 0,
       fees real NOT NULL DEFAULT 0, note text, created_at integer NOT NULL);
     DROP TABLE IF EXISTS quotes_daily;

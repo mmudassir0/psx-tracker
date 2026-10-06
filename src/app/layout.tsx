@@ -82,7 +82,10 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
             Data is scraped from the public PSX data portal (dps.psx.com.pk) and
             is delayed, not licensed real-time. This is a personal research and
             record-keeping tool — it reports market data and your own numbers,
-            and is not investment advice.
+            and is not investment advice.{" "}
+            <Link href="/privacy" className="underline">
+              Privacy
+            </Link>
           </footer>
         </div>
       </body>

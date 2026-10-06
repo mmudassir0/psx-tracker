@@ -21,6 +21,7 @@ import {
   appSettings,
   userSettings,
 } from "@/db/schema";
+import { ensureDefaultPortfolio } from "@/lib/portfolios";
 
 async function main() {
   const email = process.argv[2]?.trim().toLowerCase();
@@ -53,6 +54,14 @@ async function main() {
       await db.update(table).set({ userId: account.id }).where(unowned(table)).run();
     }
   }
+
+  // Claimed trades go into the admin's default portfolio.
+  const portfolioId = await ensureDefaultPortfolio(account.id);
+  await db
+    .update(transactions)
+    .set({ portfolioId })
+    .where(and(eq(transactions.userId, account.id), isNull(transactions.portfolioId)))
+    .run();
 
   // The migration copied old watchlist rows in with an empty owner.
   const wl = await db

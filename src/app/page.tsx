@@ -12,6 +12,9 @@ import { getPortfolio } from "@/lib/portfolio";
 import { detectRecomposition } from "@/lib/psx/ingest";
 import { DivergingBars, WeightBars } from "@/components/DivergingBars";
 import { IngestButton } from "@/components/IngestButton";
+import { WelcomeChecklist } from "@/components/WelcomeChecklist";
+import { getOnboarding } from "@/lib/onboarding";
+import { emailConfigured, telegramConfigured } from "@/lib/user-notify";
 import {
   Card,
   StatTile,
@@ -51,6 +54,10 @@ export default async function DashboardPage() {
       latestQuoteDate(),
     ]);
   const unlocked = userId != null;
+  const onboarding = await getOnboarding(userId, {
+    telegramAvailable: telegramConfigured(),
+    emailAvailable: emailConfigured(),
+  });
 
   const sectors = getSectorBreakdown(constituents);
 
@@ -86,6 +93,8 @@ export default async function DashboardPage() {
           </div>
         }
       />
+
+      {onboarding && <WelcomeChecklist steps={onboarding} />}
 
       {(recomposition.dropped.length > 0 || recomposition.added.length > 0) && (
         <RecompositionBanner

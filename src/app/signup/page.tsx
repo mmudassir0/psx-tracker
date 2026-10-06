@@ -19,7 +19,13 @@ export default async function SignupPage({
         <p className="mb-4 text-sm text-slate-600 dark:text-slate-400">
           Track your own portfolio, watchlist and alerts. Only you can see them.
         </p>
-        <SignupForm next={next} google={googleLoginEnabled()} />
+        <SignupForm
+          next={next}
+          google={googleLoginEnabled()}
+          captchaSiteKey={
+            process.env.TURNSTILE_SECRET_KEY ? process.env.TURNSTILE_SITE_KEY : undefined
+          }
+        />
       </Card>
     </div>
   );

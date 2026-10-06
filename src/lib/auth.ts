@@ -2,11 +2,14 @@ import { cache } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
-import { admin } from "better-auth/plugins";
+import { admin, captcha } from "better-auth/plugins";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import { deleteUserData } from "@/lib/account-data";
+import { emailConfigured, sendEmail } from "@/lib/user-notify";
 
 /**
  * Accounts: email + password, optional Google, open sign-up. Every user sees
@@ -51,6 +54,29 @@ export const auth = betterAuth({
     // as usernames, which is why accounts are never linked by email below.
     requireEmailVerification: false,
   },
+  // Only to confirm an address before alert emails go to it. Needs an email
+  // service (RESEND_API_KEY + EMAIL_FROM); without one the option is hidden.
+  emailVerification: emailConfigured()
+    ? {
+        sendOnSignUp: false,
+        autoSignInAfterVerification: true,
+        sendVerificationEmail: async ({ user, url }) => {
+          await sendEmail(
+            user.email,
+            "Confirm your email for PSX Tracker alerts",
+            [
+              `Hi ${user.name},`,
+              "",
+              "Open this link to confirm this address and receive PSX alerts by email:",
+              "",
+              url,
+              "",
+              "If you didn't ask for this, ignore this email.",
+            ].join("\n"),
+          );
+        },
+      }
+    : undefined,
   socialProviders: googleConfigured
     ? {
         google: {
@@ -71,6 +97,20 @@ export const auth = betterAuth({
       allowDifferentEmails: false,
     },
   },
+  user: {
+    deleteUser: {
+      enabled: true,
+      beforeDelete: async (user) => {
+        // An admin deleting themselves could leave the site with no admin.
+        if ((user as { role?: string }).role === "admin") {
+          throw new APIError("BAD_REQUEST", {
+            message: "Admins can't delete their own account. Make someone else admin first.",
+          });
+        }
+        await deleteUserData(user.id);
+      },
+    },
+  },
   session: {
     expiresIn: 60 * 60 * 24 * 30,
     updateAge: 60 * 60 * 24,
@@ -85,11 +125,26 @@ export const auth = betterAuth({
       "/sign-in/email": { window: 60, max: 5 },
       "/sign-up/email": { window: 60 * 60, max: 5 },
       "/change-password": { window: 60, max: 5 },
+      "/send-verification-email": { window: 60 * 60, max: 3 },
+      "/delete-user": { window: 60, max: 5 },
     },
   },
   telemetry: { enabled: false },
   // nextCookies must stay last: it lets server actions set auth cookies.
-  plugins: [admin(), nextCookies()],
+  plugins: [
+    admin(),
+    // Bot check on sign-up only, once Turnstile keys are set.
+    ...(process.env.TURNSTILE_SECRET_KEY
+      ? [
+          captcha({
+            provider: "cloudflare-turnstile",
+            secretKey: process.env.TURNSTILE_SECRET_KEY,
+            endpoints: ["/sign-up/email"],
+          }),
+        ]
+      : []),
+    nextCookies(),
+  ],
 });
 
 export type SessionUser = typeof auth.$Infer.Session.user;

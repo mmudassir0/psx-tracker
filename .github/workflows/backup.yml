@@ -1,0 +1,39 @@
+name: Encrypted database backup
+
+on:
+  schedule:
+    # 22:00 UTC = 03:00 PKT, after the daily ingest.
+    - cron: "0 22 * * *"
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The file is AES-256 encrypted with BACKUP_PASSPHRASE before upload:
+      # artifacts of a public repository can be downloaded by any GitHub user.
+      - name: Create encrypted backup
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: npm run backup
+
+      - name: Keep for 30 days
+        uses: actions/upload-artifact@v4
+        with:
+          name: psx-backup-${{ github.run_id }}
+          path: backups/*.enc
+          retention-days: 30
+          if-no-files-found: error

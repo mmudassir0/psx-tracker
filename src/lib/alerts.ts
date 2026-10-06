@@ -16,6 +16,8 @@ export {
 
 export interface FiredAlert {
   alertId: string;
+  /** Whose alert this is, for per-user delivery. */
+  userId: string | null;
   symbol: string | null;
   message: string;
   value: number | null;
@@ -141,6 +143,7 @@ export async function evaluateAlerts(userId?: string): Promise<FiredAlert[]> {
 
       fired.push({
         alertId: rule.id,
+        userId: rule.userId,
         symbol: rule.symbol,
         message: hit.message,
         value: hit.value,

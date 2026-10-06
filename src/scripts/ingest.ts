@@ -9,6 +9,7 @@ import { runIngest, detectRecomposition } from "@/lib/psx/ingest";
 import { evaluateAlerts } from "@/lib/alerts";
 import { notifyAlerts, notifyIngestComplete } from "@/lib/notify";
 import { recordScreenHits } from "@/lib/screens";
+import { deliverAlerts } from "@/lib/user-notify";
 import { indexLabel, sortIndexCodes } from "@/lib/psx/indices";
 
 function flagValue(name: string): string | null {
@@ -101,6 +102,9 @@ async function main() {
   if (fired.length) {
     console.log(`\n${fired.length} alert(s) fired:`);
     for (const f of fired) console.log(`  - ${f.message}`);
+    // Telegram / email, per user. SITE_URL only adds a link to the message.
+    const { sent } = await deliverAlerts(fired, process.env.SITE_URL);
+    if (sent) console.log(`  delivered ${sent} message(s)`);
   }
 
   if (result.errors.length) {
