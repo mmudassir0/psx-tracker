@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { alerts, transactions, watchlist } from "@/db/schema";
 import { getUserSetting } from "@/lib/settings";
 import { getNotifySettingsFor } from "@/lib/user-notify";
+import { hasPushDevice, pushConfigured } from "@/lib/push";
 
 export const ONBOARDING_KEY = "onboarding";
 
@@ -32,11 +33,13 @@ export async function getOnboarding(
   const state = await getUserSetting(userId, ONBOARDING_KEY, { dismissed: false });
   if (state.dismissed) return null;
 
-  const [trades, watching, alerting, notify] = await Promise.all([
+  const pushAvailable = pushConfigured();
+  const [trades, watching, alerting, notify, pushOn] = await Promise.all([
     hasAny(transactions, userId),
     hasAny(watchlist, userId),
     hasAny(alerts, userId),
     getNotifySettingsFor(userId),
+    pushAvailable ? hasPushDevice(userId) : Promise.resolve(false),
   ]);
 
   const steps: OnboardingStep[] = [
@@ -44,13 +47,17 @@ export async function getOnboarding(
     { key: "watch", label: "Follow a stock", hint: "Add names you don't own to your watchlist.", href: "/watchlist", done: watching },
     { key: "alert", label: "Set an alert", hint: "Get told when a price, P/E or KMI30 membership changes.", href: "/alerts", done: alerting },
   ];
-  if (telegramAvailable || emailAvailable) {
+  if (pushAvailable || telegramAvailable || emailAvailable) {
     steps.push({
       key: "notify",
-      label: telegramAvailable ? "Get alerts on Telegram" : "Get alerts by email",
+      label: pushAvailable
+        ? "Turn on notifications"
+        : telegramAvailable
+          ? "Get alerts on Telegram"
+          : "Get alerts by email",
       hint: "Alerts reach you without opening the site.",
       href: "/account#notifications",
-      done: Boolean(notify.telegramChatId) || notify.email,
+      done: pushOn || Boolean(notify.telegramChatId) || notify.email,
     });
   }
   return steps.every((s) => s.done) ? null : steps;

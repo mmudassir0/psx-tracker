@@ -21,6 +21,7 @@ import {
   renamePortfolio,
 } from "@/lib/portfolios";
 import { deleteUserData, exportUserData } from "@/lib/account-data";
+import { isValidSubscription, listDevices, removeSubscription, saveSubscription } from "@/lib/push";
 import { computeDisposals } from "@/lib/cgt";
 import {
   acknowledgeEvent,
@@ -76,6 +77,10 @@ db.$client.exec(`
   DROP TABLE IF EXISTS link_codes;
   CREATE TABLE link_codes (
     code text PRIMARY KEY, user_id text NOT NULL, purpose text NOT NULL, expires_at integer NOT NULL);
+  DROP TABLE IF EXISTS push_subscriptions;
+  CREATE TABLE push_subscriptions (
+    endpoint text PRIMARY KEY, user_id text NOT NULL, p256dh text NOT NULL, auth text NOT NULL,
+    device text, created_at integer NOT NULL);
   DROP TABLE IF EXISTS user_settings;
   CREATE TABLE user_settings (
     user_id text NOT NULL, key text NOT NULL, value text NOT NULL,
@@ -200,7 +205,24 @@ async function run() {
   check("bob gets the default", (await getUserSetting(BOB, "zakat", { otherAssets: 0 })).otherAssets, 0);
   check("logged out gets the default", (await getUserSetting(null, "zakat", { otherAssets: 0 })).otherAssets, 0);
 
-  console.log("\n[8] Export and delete");
+  console.log("\n[8] Push notification devices");
+  const sub = (id: string) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/${id}`, keys: { p256dh: "p".repeat(87), auth: "a".repeat(22) } });
+  check("valid subscription accepted", isValidSubscription(sub("x")), true);
+  check("http endpoint refused", isValidSubscription({ ...sub("x"), endpoint: "http://evil.example/x" }), false);
+  check("non-URL endpoint refused", isValidSubscription({ ...sub("x"), endpoint: "javascript:alert(1)" }), false);
+  check("missing keys refused", isValidSubscription({ endpoint: sub("x").endpoint }), false);
+
+  await saveSubscription(ALICE, sub("alice-phone"), "Chrome on Android");
+  await saveSubscription(BOB, sub("bob-laptop"), "Edge on Windows");
+  check("alice sees only her device", (await listDevices(ALICE)).map((d) => d.device), ["Chrome on Android"]);
+  await removeSubscription(BOB, sub("alice-phone").endpoint);
+  check("bob can't remove alice's device", (await listDevices(ALICE)).length, 1);
+  // Same browser, now logged in as bob: the endpoint moves to bob.
+  await saveSubscription(BOB, sub("alice-phone"), "Chrome on Android");
+  check("a browser belongs to whoever subscribed last", [(await listDevices(ALICE)).length, (await listDevices(BOB)).length], [0, 2]);
+  await saveSubscription(ALICE, sub("alice-tablet"), "Safari on iPhone/iPad");
+
+  console.log("\n[9] Export and delete");
   const aliceExport = await exportUserData(ALICE);
   check("export has only alice's trades", aliceExport.transactions.every((t) => t.userId === ALICE), true);
   check("export includes her portfolio", aliceExport.portfolios.length, 1);
@@ -212,6 +234,8 @@ async function run() {
     [gone.transactions.length, gone.portfolios.length, gone.alerts.length, gone.alertEvents.length, gone.customScreens.length, Object.keys(gone.settings).length],
     [0, 0, 0, 0, 0, 0]);
   check("bob's data is untouched", (await listTransactions(BOB)).length, bobBefore);
+  check("alice's devices are gone", (await listDevices(ALICE)).length, 0);
+  check("bob's devices are untouched", (await listDevices(BOB)).length, 2);
 }
 
 run()

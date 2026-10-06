@@ -169,6 +169,17 @@ async function main() {
     "expires_at" integer NOT NULL
   )`);
 
+  console.log("Push subscriptions…");
+  await exec(`create table if not exists "push_subscriptions" (
+    "endpoint" text PRIMARY KEY NOT NULL,
+    "user_id" text NOT NULL,
+    "p256dh" text NOT NULL,
+    "auth" text NOT NULL,
+    "device" text,
+    "created_at" integer NOT NULL
+  )`);
+  await exec(`create index if not exists "push_subscriptions_user_idx" on "push_subscriptions" ("user_id")`);
+
   console.log("Done.");
 }
 

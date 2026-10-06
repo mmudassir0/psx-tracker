@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
@@ -23,6 +23,17 @@ export const metadata: Metadata = {
   title: "KMI30 Tracker",
   description:
     "Personal dashboard for PSX KMI30 constituents, portfolio and Shariah recomposition tracking.",
+  // Installed on an iPhone home screen it opens like an app, which iOS
+  // requires before a site may send push notifications.
+  appleWebApp: { capable: true, title: "KMI30", statusBarStyle: "default" },
+  icons: {
+    icon: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0f172a",
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {

@@ -3,6 +3,7 @@ import { and, eq, gt, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { linkCodes, user, userSettings } from "@/db/schema";
 import { getUserSetting, setUserSetting } from "@/lib/settings";
+import { sendPushToUser } from "@/lib/push";
 
 /**
  * Per-user alert delivery by Telegram and email.
@@ -154,6 +155,14 @@ export async function deliverAlerts(fired: DeliverableAlert[], siteUrl?: string)
     const lines = messages.map((m) => `• ${m}`).join("\n");
     const footer = siteUrl ? `\n\n${siteUrl}/alerts` : "";
     const text = `PSX alert${messages.length === 1 ? "" : "s"}:\n${lines}${footer}`;
+
+    // Browser push: one notification per user, replacing yesterday's.
+    sent += await sendPushToUser(userId, {
+      title: messages.length === 1 ? "PSX alert" : `${messages.length} PSX alerts`,
+      body: messages.join("\n"),
+      url: "/alerts",
+      tag: "psx-alerts",
+    });
 
     if (settings.telegramChatId && telegramConfigured()) {
       if (await sendTelegram(settings.telegramChatId, text)) sent++;

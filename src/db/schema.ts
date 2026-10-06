@@ -474,3 +474,22 @@ export const rateLimit = sqliteTable("rate_limit", {
   count: integer("count").notNull(),
   lastRequest: integer("last_request").notNull(),
 });
+
+/**
+ * Browser push subscriptions: one per device a user enabled notifications
+ * on. The endpoint is unique per browser install; push services return
+ * 404/410 once it's gone, and the row is then removed.
+ */
+export const pushSubscriptions = sqliteTable(
+  "push_subscriptions",
+  {
+    endpoint: text("endpoint").primaryKey(),
+    userId: text("user_id").notNull(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    /** "Chrome on Android" etc., so the account page can list devices. */
+    device: text("device"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [index("push_subscriptions_user_idx").on(t.userId)],
+);

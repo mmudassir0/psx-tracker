@@ -43,6 +43,13 @@ import { and, eq } from "drizzle-orm";
 import { setUserSetting } from "@/lib/settings";
 import { notifyAlerts } from "@/lib/notify";
 import {
+  isValidSubscription,
+  pushConfigured,
+  removeSubscription,
+  saveSubscription,
+  sendPushToUser,
+} from "@/lib/push";
+import {
   createTelegramLink,
   deliverAlerts,
   sendTelegram,
@@ -759,4 +766,41 @@ export async function dismissOnboardingAction() {
   const userId = await userIdOrThrow();
   await setUserSetting(userId, "onboarding", { dismissed: true });
   revalidatePath("/");
+}
+
+/** Store this browser's push subscription for the logged-in user. */
+export async function savePushSubscriptionAction(
+  subscription: unknown,
+  device: string,
+): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
+  if (!pushConfigured()) return { ok: false, message: "Notifications aren't set up on this site." };
+  if (!isValidSubscription(subscription)) return { ok: false, message: "The browser sent an invalid subscription." };
+  const result = await saveSubscription(userId, subscription, device || null);
+  if (!result.ok) return { ok: false, message: result.message ?? "Couldn't save." };
+  revalidatePath("/account");
+  return { ok: true, message: "Notifications are on for this device." };
+}
+
+export async function removePushSubscriptionAction(endpoint: string): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
+  if (typeof endpoint === "string" && endpoint) await removeSubscription(userId, endpoint);
+  revalidatePath("/account");
+  return { ok: true, message: "Notifications are off for this device." };
+}
+
+export async function testPushAction(): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
+  const delivered = await sendPushToUser(userId, {
+    title: "PSX Tracker",
+    body: "Test notification: your alerts will arrive like this.",
+    url: "/account#notifications",
+    tag: "psx-test",
+  });
+  return delivered > 0
+    ? { ok: true, message: `Sent to ${delivered} device${delivered === 1 ? "" : "s"}.` }
+    : { ok: false, message: "No device accepted it. Turn notifications on first." };
 }

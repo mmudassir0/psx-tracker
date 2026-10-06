@@ -6,6 +6,7 @@ import {
   customScreens,
   linkCodes,
   portfolios,
+  pushSubscriptions,
   screenHits,
   transactions,
   userSettings,
@@ -92,4 +93,5 @@ export async function deleteUserData(userId: string): Promise<void> {
   await db.delete(watchlist).where(eq(watchlist.userId, userId)).run();
   await db.delete(userSettings).where(eq(userSettings.userId, userId)).run();
   await db.delete(linkCodes).where(eq(linkCodes.userId, userId)).run();
+  await db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, userId)).run();
 }

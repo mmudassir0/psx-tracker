@@ -131,12 +131,13 @@ Built on [Better Auth](https://better-auth.com) (`src/lib/auth.ts`):
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | For bot protection | Cloudflare Turnstile keys. Without them sign-up has no bot check. |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_WEBHOOK_SECRET` | For Telegram alerts | Bot from @BotFather; the webhook secret is any long random string. See below. |
 | `RESEND_API_KEY`, `EMAIL_FROM` | For email alerts | Resend key and a sender on a domain verified in Resend. |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | For browser notifications | Web Push key pair (see Alert notifications); subject is your site URL. |
 | `SITE_URL` | No | Public URL; adds a link to alert messages and is the default for `telegram:setup`. |
 | `BACKUP_PASSPHRASE` | For backups | 16+ characters. Encrypts backups; keep a copy outside the repo or backups can't be opened. |
 
 Variables used by the daily jobs (ingest alerts, backups) must also be set as
 GitHub Actions secrets: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`,
-`BACKUP_PASSPHRASE`, and the Telegram / Resend ones if you use them.
+`BACKUP_PASSPHRASE`, and the VAPID / Telegram / Resend ones if you use them.
 
 ### First-time setup on an existing database
 
@@ -205,6 +206,16 @@ same file can be imported twice safely. Up to 5,000 rows per file.
 
 Alerts fire during the daily ingest. Each user chooses on `/account` where
 they're delivered; each channel stays hidden until its variables are set.
+
+**Browser notifications** (recommended; work where Telegram is blocked) go
+through the browser maker's push service (Google, Apple, Mozilla). Users press
+**Turn on notifications** on `/account`, once per device. On iPhone/iPad the
+site must first be added to the home screen (Share → Add to Home Screen); the
+site ships a web app manifest and icons for this. Needs `VAPID_PUBLIC_KEY`,
+`VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` (your site URL); generate a key pair
+with `node -e "console.log(require('web-push').generateVAPIDKeys())"`. Changing
+the keys silently stops every existing subscription. Devices that uninstall or
+expire are removed automatically on the next send.
 
 **Telegram**
 

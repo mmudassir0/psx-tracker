@@ -8,6 +8,8 @@ import { ConnectGoogleButton } from "@/components/ConnectGoogleButton";
 import { DeleteAccountForm } from "@/components/DeleteAccountForm";
 import { EmailAlertSettings, TelegramSettings } from "@/components/NotificationSettings";
 import { emailConfigured, getNotifySettingsFor, telegramConfigured } from "@/lib/user-notify";
+import { listDevices, pushConfigured, vapidPublicKey } from "@/lib/push";
+import { PushSettings } from "@/components/PushSettings";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +35,9 @@ export default async function AccountPage({
     ?? (errors.length ? "Google couldn't be connected. Try again." : null);
 
   const notify = await getNotifySettingsFor(user.id);
+  const pushDevices = pushConfigured()
+    ? (await listDevices(user.id)).map(({ endpoint, device }) => ({ endpoint, device }))
+    : [];
 
   const providers = new Set(
     (
@@ -83,10 +88,16 @@ export default async function AccountPage({
         </Card>
       )}
 
-      {(telegramConfigured() || emailConfigured()) && (
+      {(pushConfigured() || telegramConfigured() || emailConfigured()) && (
         <section id="notifications" className="scroll-mt-4">
           <Card title="Alert notifications" subtitle="Where your alerts are sent after each daily update (weekdays around 4–6 PM PKT).">
             <div className="flex flex-col gap-5">
+              {pushConfigured() && (
+                <div className="flex flex-col gap-2">
+                  <h3 className="text-sm font-medium">Notifications on this device</h3>
+                  <PushSettings publicKey={vapidPublicKey()!} devices={pushDevices} />
+                </div>
+              )}
               {telegramConfigured() && (
                 <div className="flex flex-col gap-2">
                   <h3 className="text-sm font-medium">Telegram</h3>
