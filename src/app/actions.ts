@@ -804,3 +804,14 @@ export async function testPushAction(): Promise<ActionState> {
     ? { ok: true, message: `Sent to ${delivered} device${delivered === 1 ? "" : "s"}.` }
     : { ok: false, message: "No device accepted it. Turn notifications on first." };
 }
+
+/** Save which index the dashboard opens on for this user. */
+export async function setDashboardIndexAction(formData: FormData) {
+  const userId = await userIdOrThrow();
+  const code = String(formData.get("index") ?? "").toUpperCase();
+  const { getTrackedIndexCodes } = await import("@/lib/market");
+  if (!(await getTrackedIndexCodes()).includes(code)) return;
+  await setUserSetting(userId, "dashboard", { index: code });
+  revalidatePath("/");
+  redirect("/");
+}
