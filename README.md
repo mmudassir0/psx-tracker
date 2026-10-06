@@ -21,7 +21,7 @@ It reports market data and your own numbers. It does not give investment advice.
 | **Movers & breadth** | Market-wide gainers, losers, most traded (30-day average value), plus advance/decline breadth |
 | **Screener** | Sort/filter on P/E, YTD, 1Y, weight, market cap, 30-day average volume, distance off 52-week high |
 | **Symbol** | Price history since 2021, key stats, dividend yield, past payouts with book-closure dates, 4 years of financials and ratios, announcement feed, your position |
-| **Portfolio** | Holdings with weighted-average cost, unrealised/realised P&L, dividend income, **your weight vs index weight** per stock and per sector |
+| **Portfolio** | Several named portfolios per account (or all combined), holdings with weighted-average cost, unrealised/realised P&L, dividend income, **your weight vs index weight**, value over time against the same money in KMI30, a dividend recorder, and CSV import from your broker |
 | **Strategy** | Backtest an index basket against the index itself, and get the exact trades to move your portfolio onto those weights |
 | **Risk** | Correlation matrix, beta vs index, and concentration — whether your positions are actually diversified |
 | **Liquidity** | 30-day average traded value per name, and how many sessions a position would take to exit |
@@ -33,9 +33,13 @@ It reports market data and your own numbers. It does not give investment advice.
 | **Calendar** | Dividends, bonus, rights, results, board meetings and AGMs — filterable by index, type, or just your holdings |
 | **Alerts** | Price / P/E / 52-week-proximity thresholds, plus membership-change rules |
 | **Health** | What the database holds, where PSX coverage is thin, and whether the daily job is succeeding |
+| **Account** | Change password, connect Google, Telegram / email alerts, download all your data, delete your account |
+| **Admin** | Every account: reset a forgotten password, disable an account |
+| **Privacy** | What is stored, who can see it, and how to remove it |
 
 Every page shows a banner when the newest prices are two or more trading
-sessions old, and price charts shade any stretch with no data.
+sessions old, and price charts shade any stretch with no data. New accounts
+get a short "Get started" checklist on the dashboard.
 
 ### Indices covered
 
@@ -103,9 +107,16 @@ Built on [Better Auth](https://better-auth.com) (`src/lib/auth.ts`):
 - Login, sign-up and password changes are rate limited per IP (5 a minute for
   login; 5 an hour for sign-up), counted in the database so the limit holds
   across serverless instances.
-- Emails are **not verified** (there is no email service). Treat them as
-  usernames. For the same reason a Google login is never merged into an
-  existing email account.
+- Emails are **not verified** at sign-up. Treat them as usernames. For the
+  same reason a Google login is never merged into an existing email account
+  automatically; a logged-in user can connect Google from their Account page.
+  An address is only verified (by emailed link) when someone turns on email
+  alerts, so the site never mails an address its owner didn't confirm.
+- Sign-up can require a Cloudflare Turnstile check (bot protection) once its
+  keys are set.
+- Anyone can download all their data (CSV of trades, or everything as JSON)
+  and delete their account from `/account`. Deletion removes every personal
+  row; admins can't delete themselves, so the site always keeps one.
 - Every personal query takes the owner's id and filters by it; pages and
   actions get that id from the session. `npm run test:accounts` checks that
   one user can't read or change another's data, even by guessing ids.
@@ -117,15 +128,27 @@ Built on [Better Auth](https://better-auth.com) (`src/lib/auth.ts`):
 | `AUTH_SECRET` | Yes | Long random string: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Changing it logs everyone out. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | For Google login | From a Google Cloud OAuth client (below). Without them the Google button is hidden. |
 | `BETTER_AUTH_URL` | No | Public URL of the site. On Vercel the production domain is used automatically. |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | For bot protection | Cloudflare Turnstile keys. Without them sign-up has no bot check. |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_WEBHOOK_SECRET` | For Telegram alerts | Bot from @BotFather; the webhook secret is any long random string. See below. |
+| `RESEND_API_KEY`, `EMAIL_FROM` | For email alerts | Resend key and a sender on a domain verified in Resend. |
+| `SITE_URL` | No | Public URL; adds a link to alert messages and is the default for `telegram:setup`. |
+| `BACKUP_PASSPHRASE` | For backups | 16+ characters. Encrypts backups; keep a copy outside the repo or backups can't be opened. |
+
+Variables used by the daily jobs (ingest alerts, backups) must also be set as
+GitHub Actions secrets: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`,
+`BACKUP_PASSPHRASE`, and the Telegram / Resend ones if you use them.
 
 ### First-time setup on an existing database
 
 ```bash
-npm run migrate:accounts
+npm run migrate
 ```
 
-Creates the account tables and adds an owner to every personal table. Safe to
-run again; it only adds what is missing. Then sign up on the site and run:
+Brings an older database up to the current schema: account tables, an owner
+on every personal table, portfolios (existing trades go into a "Main"
+portfolio), per-user settings and link codes. Safe to run again; it only adds
+what is missing. Run it **before** deploying code that needs the new schema.
+Then sign up on the site and run:
 
 ```bash
 npm run make-admin -- you@example.com
@@ -148,6 +171,82 @@ everywhere and should change it on `/account`), or disable an account.
 2. Authorised redirect URI: `https://<your-domain>/api/auth/callback/google`
    (and `http://localhost:3000/api/auth/callback/google` for local use).
 3. Put the client ID and secret in `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+4. Under OAuth consent screen → Audience, **Publish app**, or only listed test
+   users can log in.
+
+## Portfolios
+
+Each account can have up to 20 named portfolios ("Long-term", "Trading", a
+family member's). The Portfolio page switches between them or shows all
+combined; trades can be moved between them. A portfolio can only be deleted
+when empty, and the last one never, so a misclick can't remove trades.
+
+Tax (CGT) and zakat always combine every portfolio, since both are per person.
+
+**Value over time** replays the ledger over daily closes: market value, cost
+basis, and the same money in KMI30 (each purchase buys index units on its
+date, each sale withdraws its proceeds), so timing is compared fairly. Price
+only; dividends are not added to the value line.
+
+**Dividends**: PSX no longer publishes payouts, so dividends are recorded on
+the Portfolio page. Leave shares blank to use what the portfolio held on that
+date; tax defaults to 15% (filer), with 30% (non-filer), none or an exact
+amount as options.
+
+**CSV import** (`/portfolio/import`): upload or paste a broker export. Columns
+are guessed from the header and can be changed; dates in day-first,
+month-first, ISO or `05-Oct-2026` form; `B`/`S`/`Purchase`/`Sale` and
+similar; thousands separators; a negative quantity means a sale when there is
+no buy/sell column. Rows are previewed with the reason any can't be read, and
+re-parsed on the server on import. Rows already recorded are skipped, so the
+same file can be imported twice safely. Up to 5,000 rows per file.
+
+## Alert notifications
+
+Alerts fire during the daily ingest. Each user chooses on `/account` where
+they're delivered; each channel stays hidden until its variables are set.
+
+**Telegram**
+
+1. Create a bot with @BotFather; set `TELEGRAM_BOT_TOKEN` and
+   `TELEGRAM_BOT_USERNAME` (without @), plus a random `TELEGRAM_WEBHOOK_SECRET`.
+2. After deploying, point the bot at the site once:
+
+   ```bash
+   npm run telegram:setup -- https://your-site.example
+   ```
+
+3. Users press **Connect Telegram**, open the one-time link (valid 15
+   minutes) and press Start. The bot's webhook (`/api/telegram`) only accepts
+   requests carrying the secret. `/stop` in the chat turns alerts off.
+
+**Email** uses Resend. Alerts only go to addresses confirmed through an
+emailed link. Without a domain verified in Resend, Resend only delivers to
+your own address.
+
+## Backups
+
+`.github/workflows/backup.yml` runs nightly (03:00 PKT) and on demand. It
+saves accounts, everyone's personal data and all market data, including the
+price history PSX no longer serves, so it can't be re-fetched. Sessions and
+other short-lived tokens are left out.
+
+Backups are gzipped and encrypted (AES-256-GCM, key from `BACKUP_PASSPHRASE`
+via scrypt) **before** upload, because artifacts of a public repository can be
+downloaded by any GitHub user. They are kept 30 days.
+
+```bash
+npm run backup
+```
+
+```bash
+npm run backup:decrypt -- backups/psx-backup-2026-10-06.enc
+```
+
+The first writes `backups/psx-backup-<date>.enc` from the current database;
+the second turns a downloaded backup back into JSON (every table as an array
+of rows). The JSON contains everyone's data and password hashes: keep it
+private and delete it after use. `backups/` is git-ignored.
 
 ## Daily updates
 
@@ -175,10 +274,13 @@ after an hour is shown as interrupted.
 | `npm run ingest -- --indices=KMI30` | Fundamentals for one index only |
 | `npm run ingest -- --recheck-pages` | Retry symbols marked as having no company page |
 | `npm run verify` | Smoke-test the PSX parsers against live pages |
-| `npm test` | Portfolio math, recomposition, backtest, zakat, parsers, account isolation, links |
-| `npm run migrate:accounts` | Add the account tables to an existing database |
+| `npm test` | Portfolio math, recomposition, backtest, zakat, parsers, account isolation, CSV import, history, backup encryption, links |
+| `npm run migrate` | Bring an existing database up to the current schema |
 | `npm run make-admin -- <email>` | Make an account the admin and give it pre-account data |
 | `npm run seed:demo -- <email>` | Add demo transactions to an account (`seed:clear` removes them) |
+| `npm run telegram:setup -- <url>` | Point the Telegram bot's webhook at the site |
+| `npm run backup` | Write an encrypted backup to `backups/` |
+| `npm run backup:decrypt -- <file>` | Open an encrypted backup as JSON |
 | `npm run db:studio` | Browse the database |
 
 `npm test` always runs against scratch SQLite files under `.scratch/`, even
@@ -318,9 +420,10 @@ order of magnitude.
 names traded; anything under 30 overlapping sessions is marked with an asterisk
 because the number looks more precise than it is.
 
-**Notifications are macOS-only.** Alerts fire a native banner via `osascript`
-during an ingest. On any other platform it is a silent no-op, and a
-notification failure can never fail the ingest.
+**Notifications never fail the ingest.** Each user's alerts go out by
+Telegram or email (see Alert notifications); a delivery failure is logged and
+the run carries on. An ingest run by hand on a Mac also shows a native banner
+via `osascript`, which is a silent no-op anywhere else.
 
 **The zakat calculator takes no scholarly position.** Scholars differ on how
 zakat applies to shares, particularly whether full market value is assessed or
@@ -335,7 +438,7 @@ shows the full arithmetic so you can check it by hand, and it is not a fatwa.
 
 ```
 src/
-  db/schema.ts          Tables: quotes, constituents, stats, ledger, alerts
+  db/schema.ts          Tables: market data, accounts, ledger, portfolios, alerts
   db/index.ts           Turso when TURSO_DATABASE_URL is set, else local SQLite
   lib/
     psx/client.ts       HTTP with cache, retry, bounded concurrency
@@ -343,7 +446,14 @@ src/
     psx/ingest.ts       The ingest pass + recomposition diffing
     psx/indices.ts      Index catalogue: names, Shariah flags, ordering
     market.ts           Constituent views, index weights, history
-    portfolio.ts        Weighted-average cost engine
+    auth.ts             Accounts (Better Auth): sessions, Google, admin, bot check
+    portfolio.ts        Weighted-average cost engine, per user and portfolio
+    portfolios.ts       Named portfolios: create, rename, delete-when-empty
+    portfolio-history.ts  Daily value replay and the KMI30 comparison
+    csv-import.ts       Broker CSV parsing and column guessing
+    account-data.ts     Export and deletion of one user's data
+    user-notify.ts      Telegram and email alert delivery
+    backup-crypto.ts    Backup encryption
     backtest.ts         Simulation + rebalance planner
     dividends.ts        Yield, payout history, book closures
     financials.ts       Annual financials and ratios
@@ -352,10 +462,14 @@ src/
     alerts.ts           Rule evaluation
     recomposition.ts    Membership history
   app/                  Dashboard, indices, index/[code], screener,
-                        symbol/[symbol], portfolio, strategy, zakat,
-                        recomposition, calendar, alerts, health
-  scripts/              ingest, parser smoke test, tests and their runner
-.github/workflows/      Daily ingest
+                        symbol/[symbol], portfolio (+ import), strategy,
+                        zakat, recomposition, calendar, alerts, health,
+                        login, signup, account, admin, privacy
+  app/api/              auth, cgt.csv, export, telegram webhook
+  proxy.ts              Redirects logged-out visitors from personal pages
+  scripts/              ingest, migrate, make-admin, backup, telegram setup,
+                        parser smoke test, tests and their runner
+.github/workflows/      Daily ingest, nightly encrypted backup
 ```
 
 Charts follow a validated colour method: the gain/loss scale is **blue↔red**,
@@ -365,4 +479,4 @@ Every bar carries its own value label, so colour is never the only encoding.
 ## Stack
 
 Next.js 16 (App Router) · React 19 · TypeScript · Tailwind 4 · SQLite / Turso
-via Drizzle · Recharts · Cheerio · Vercel · GitHub Actions.
+via Drizzle · Better Auth · Recharts · Cheerio · Vercel · GitHub Actions.
