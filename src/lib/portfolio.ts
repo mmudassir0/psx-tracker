@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, lte, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { transactions } from "@/db/schema";
-import { getConstituents, type ConstituentView } from "@/lib/market";
+import { getAllSymbolViews, getConstituents, type ConstituentView } from "@/lib/market";
 import { ensureDefaultPortfolio, ownsPortfolio } from "@/lib/portfolios";
 import { txKey, type ImportedTx } from "@/lib/csv-import";
 
@@ -24,6 +24,8 @@ export interface HoldingView extends Holding {
   sectorName: string | null;
   close: number | null;
   changePct: number | null;
+  /** PKR change in this position's value today: quantity × (close − previous close). */
+  dayChange: number | null;
   marketValue: number | null;
   unrealizedPnl: number | null;
   unrealizedPct: number | null;
@@ -35,7 +37,7 @@ export interface HoldingView extends Holding {
   indexWeightPct: number | null;
   /** portfolioWeight - indexWeight. Positive = overweight vs the index. */
   activeWeightPct: number | null;
-  /** True when the name is no longer a KMI30 constituent. */
+  /** True when the name is not (or no longer) a KMI30 constituent. */
   droppedFromIndex: boolean;
 }
 
@@ -43,6 +45,9 @@ export interface PortfolioSummary {
   holdings: HoldingView[];
   investedValue: number;
   marketValue: number;
+  /** Today's change in the value of open positions, PKR and %. */
+  dayChange: number;
+  dayChangePct: number | null;
   unrealizedPnl: number;
   unrealizedPct: number;
   realizedPnl: number;
@@ -153,14 +158,19 @@ export async function getPortfolio(
   scope: LedgerScope = {},
 ): Promise<PortfolioSummary> {
   const holdings = await getHoldings(userId, scope);
-  const constituents = await getConstituents();
-  const bySymbol = new Map<string, ConstituentView>(
-    constituents.map((c) => [c.symbol, c]),
-  );
+  if (holdings.length === 0) return emptyPortfolio();
+
+  // Prices come from every listed symbol, not just KMI30: a holding outside
+  // the index still has a price. KMI30 supplies index weights only.
+  const [allSymbols, constituents] = await Promise.all([getAllSymbolViews(), getConstituents()]);
+  const priced = new Map<string, ConstituentView>(allSymbols.map((c) => [c.symbol, c]));
+  const inIndex = new Map<string, ConstituentView>(constituents.map((c) => [c.symbol, c]));
 
   const views: HoldingView[] = holdings.map((holding) => {
-    const market = bySymbol.get(holding.symbol);
+    const member = inIndex.get(holding.symbol);
+    const market = member ?? priced.get(holding.symbol);
     const close = market?.close ?? null;
+    const ldcp = market?.ldcp ?? null;
     const marketValue = close == null ? null : holding.quantity * close;
     const unrealizedPnl =
       marketValue == null ? null : marketValue - holding.investedValue;
@@ -171,6 +181,10 @@ export async function getPortfolio(
       sectorName: market?.sectorName ?? null,
       close,
       changePct: market?.changePct ?? null,
+      dayChange:
+        close != null && ldcp != null && holding.quantity > 0
+          ? holding.quantity * (close - ldcp)
+          : null,
       marketValue,
       unrealizedPnl,
       unrealizedPct:
@@ -182,9 +196,9 @@ export async function getPortfolio(
           ? null
           : unrealizedPnl + holding.realizedPnl + holding.dividendIncome,
       portfolioWeightPct: null,
-      indexWeightPct: market?.indexWeightPct ?? null,
+      indexWeightPct: member?.indexWeightPct ?? null,
       activeWeightPct: null,
-      droppedFromIndex: holding.quantity > 0 && !market,
+      droppedFromIndex: holding.quantity > 0 && !member,
     };
   });
 
@@ -266,10 +280,15 @@ export async function getPortfolio(
     .filter((v) => v.droppedFromIndex)
     .map((v) => v.symbol);
 
+  const dayChange = openPositions.reduce((sum, v) => sum + (v.dayChange ?? 0), 0);
+  const previousValue = marketValue - dayChange;
+
   return {
     holdings: views,
     investedValue,
     marketValue,
+    dayChange,
+    dayChangePct: previousValue > 0 ? (dayChange / previousValue) * 100 : null,
     unrealizedPnl,
     unrealizedPct,
     realizedPnl: views.reduce((sum, v) => sum + v.realizedPnl, 0),
@@ -394,4 +413,21 @@ export async function importTransactions(
       .run();
   }
   return { imported: fresh.length, skipped: rows.length - fresh.length };
+}
+
+function emptyPortfolio(): PortfolioSummary {
+  return {
+    holdings: [],
+    investedValue: 0,
+    marketValue: 0,
+    dayChange: 0,
+    dayChangePct: null,
+    unrealizedPnl: 0,
+    unrealizedPct: 0,
+    realizedPnl: 0,
+    dividendIncome: 0,
+    totalPnl: 0,
+    sectors: [],
+    droppedHoldings: [],
+  };
 }

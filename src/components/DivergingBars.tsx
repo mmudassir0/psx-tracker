@@ -12,6 +12,11 @@ export interface DivergingDatum {
   /** 30-session average share volume. */
   volume: number | null;
   weightPct: number | null;
+  /**
+   * The stock's own % change, when the bar shows something else (index
+   * points). Omitted, the bar value is the % change.
+   */
+  changePct?: number | null;
 }
 
 /**
@@ -123,7 +128,19 @@ export function DivergingBars({
                     <dt className="text-slate-500 dark:text-slate-400">
                       Change
                     </dt>
-                    <dd className="text-right">{pct(d.value)}</dd>
+                    <dd className="text-right">
+                      {pct(d.changePct !== undefined ? d.changePct : d.value)}
+                    </dd>
+                    {d.changePct !== undefined && (
+                      <>
+                        <dt className="text-slate-500 dark:text-slate-400">
+                          Index points
+                        </dt>
+                        <dd className="text-right">
+                          {d.value == null ? "—" : `${d.value > 0 ? "+" : ""}${d.value.toFixed(2)}`}
+                        </dd>
+                      </>
+                    )}
                     <dt className="text-slate-500 dark:text-slate-400">
                       Avg vol (30D)
                     </dt>

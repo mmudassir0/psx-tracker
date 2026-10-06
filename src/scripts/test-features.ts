@@ -15,6 +15,7 @@ import {
 } from "@/lib/csv-import";
 import { replayLedger } from "@/lib/portfolio-history";
 import { decryptBackup, encryptBackup } from "@/lib/backup-crypto";
+import { computeIndexMovers } from "@/lib/index-movers";
 
 let failures = 0;
 function check(label: string, actual: unknown, expected: unknown) {
@@ -85,7 +86,25 @@ const late = replayLedger(
 );
 check("benchmark waits for the first index level", late.map((p) => p.benchmark), [null, null, 1000]);
 
-console.log("\n[5] Backup encryption");
+console.log("\n[5] What moved the index");
+{
+  const movers = computeIndexMovers(
+    [
+      { symbol: "A", name: null, close: 11, ldcp: 10, freeFloatShares: 100 },
+      { symbol: "B", name: null, close: 9.9, ldcp: 10, freeFloatShares: 900 },
+      { symbol: "C", name: null, close: null, ldcp: 10, freeFloatShares: 50 },
+    ],
+    { current: 1001, change: 1 },
+  );
+  check("points per stock, biggest first", movers.rows.map((r) => [r.symbol, Math.round(r.points * 100) / 100]), [["A", 10], ["B", -9]]);
+  check("weights at the previous close", movers.rows.map((r) => Math.round(r.weightPct)), [10, 90]);
+  check("contributions add up to the move", Math.round(movers.explainedPoints * 100) / 100, 1);
+  check("published move", movers.actualPoints, 1);
+  check("previous level from changePct", Math.round(computeIndexMovers([], { current: 1010, changePct: 1 }).previousLevel ?? 0), 1000);
+  check("no level, no rows", computeIndexMovers([{ symbol: "A", name: null, close: 11, ldcp: 10, freeFloatShares: 1 }], null).rows.length, 0);
+}
+
+console.log("\n[6] Backup encryption");
 const secret = "correct horse battery staple";
 const sample = JSON.stringify({ tables: { user: [{ email: "a@b.c" }] } });
 const sealed = encryptBackup(sample, secret);

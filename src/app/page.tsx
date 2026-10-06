@@ -3,6 +3,7 @@ import Link from "next/link";
 import {
   getConstituents,
   getLatestIndexLevel,
+  getIndexHistory,
   getSectorBreakdown,
   getLastIngest,
   latestQuoteDate,
@@ -12,6 +13,10 @@ import { getPortfolio } from "@/lib/portfolio";
 import { detectRecomposition } from "@/lib/psx/ingest";
 import { DivergingBars, WeightBars } from "@/components/DivergingBars";
 import { IngestButton } from "@/components/IngestButton";
+import { PriceChart } from "@/components/PriceChart";
+import { YourDay } from "@/components/YourDay";
+import { computeIndexMovers } from "@/lib/index-movers";
+import { listAlertEvents } from "@/lib/alerts";
 import { WelcomeChecklist } from "@/components/WelcomeChecklist";
 import { getOnboarding } from "@/lib/onboarding";
 import { emailConfigured, telegramConfigured } from "@/lib/user-notify";
@@ -44,7 +49,7 @@ export default async function DashboardPage() {
   if (await isDatabaseEmpty()) return <FirstRun />;
   const userId = await getCurrentUserId();
 
-  const [constituents, index, portfolio, recomposition, lastIngest, quoteDate] =
+  const [constituents, index, portfolio, recomposition, lastIngest, quoteDate, history, events] =
     await Promise.all([
       getConstituents(),
       getLatestIndexLevel(),
@@ -52,7 +57,13 @@ export default async function DashboardPage() {
       detectRecomposition(),
       getLastIngest(),
       latestQuoteDate(),
+      getIndexHistory(),
+      listAlertEvents(userId, 30),
     ]);
+  const alertsToday = events
+    .filter((e) => e.date === quoteDate)
+    .map((e) => ({ id: e.id, message: e.message }));
+  const movers = computeIndexMovers(constituents, index);
   const unlocked = userId != null;
   const onboarding = await getOnboarding(userId, {
     telegramAvailable: telegramConfigured(),
@@ -64,9 +75,6 @@ export default async function DashboardPage() {
   const advancers = constituents.filter((c) => (c.changePct ?? 0) > 0).length;
   const decliners = constituents.filter((c) => (c.changePct ?? 0) < 0).length;
 
-  const byChange = [...constituents]
-    .filter((c) => c.changePct != null)
-    .sort((a, b) => (b.changePct ?? 0) - (a.changePct ?? 0));
 
   return (
     <div className="flex flex-col gap-6">
@@ -166,20 +174,46 @@ export default async function DashboardPage() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card
-          title="Day change by constituent"
-          subtitle="Sorted best to worst. Every bar is labelled, so colour is never the only signal."
+          title="KMI30 over time"
+          subtitle="Index level at each session's close"
+          className={unlocked ? "lg:col-span-2" : "lg:col-span-3"}
+        >
+          <PriceChart
+            data={history.map((h) => ({ date: h.date, close: h.current }))}
+            label="KMI30"
+            height={260}
+          />
+        </Card>
+        {unlocked && <YourDay portfolio={portfolio} alertsToday={alertsToday} />}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card
+          title="What moved the index"
+          subtitle={
+            movers.rows.length > 0
+              ? `Index points each stock added or took away today: weight × its own change. Together they explain ${signed(movers.explainedPoints)} points` +
+                (movers.actualPoints != null
+                  ? ` of today's ${signed(movers.actualPoints)}; the difference is PSX's own weighting (single-stock caps and free-float bands).`
+                  : ".")
+              : "Index points each stock added or took away today."
+          }
           className="lg:col-span-2"
         >
-          {byChange.length > 0 ? (
+          {movers.rows.length > 0 ? (
             <DivergingBars
-              data={byChange.map((c) => ({
-                symbol: c.symbol,
-                name: c.name,
-                value: c.changePct,
-                close: c.close,
-                volume: c.avgVolume30d,
-                weightPct: c.indexWeightPct,
+              data={movers.rows.map((r) => ({
+                symbol: r.symbol,
+                name: r.name,
+                value: r.points,
+                changePct: r.changePct,
+                close: constituents.find((c) => c.symbol === r.symbol)?.close ?? null,
+                volume: constituents.find((c) => c.symbol === r.symbol)?.avgVolume30d ?? null,
+                weightPct: r.weightPct,
               }))}
+              valueSuffix=" pts"
+              positiveLabel="Added points"
+              negativeLabel="Took points"
             />
           ) : (
             <p className="py-6 text-center text-sm text-slate-500">
@@ -317,4 +351,8 @@ function FirstRun() {
       </EmptyState>
     </div>
   );
+}
+
+function signed(points: number): string {
+  return `${points > 0 ? "+" : ""}${points.toFixed(1)}`;
 }

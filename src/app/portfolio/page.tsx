@@ -109,12 +109,12 @@ export default async function PortfolioPage({
       {portfolio.droppedHoldings.length > 0 && (
         <div className="rounded-xl border border-rose-300 bg-rose-50 p-4 text-sm dark:border-rose-800 dark:bg-rose-950/40">
           <p className="font-medium">
-            ⚠️ Holdings no longer in KMI30:{" "}
+            ⚠️ Holdings not in KMI30:{" "}
             {portfolio.droppedHoldings.join(", ")}
           </p>
           <p className="mt-1">
-            These are outside the index&apos;s Shariah screen. Prices for them
-            stop updating because the ingest only tracks current constituents.
+            These are outside the index&apos;s Shariah screen (either dropped
+            from it or never in it). Check them against your own screening.
           </p>
         </div>
       )}
