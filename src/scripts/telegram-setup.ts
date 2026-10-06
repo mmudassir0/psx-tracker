@@ -21,6 +21,7 @@ async function main() {
     process.exit(1);
   }
   const res = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
+    signal: AbortSignal.timeout(15_000),
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -35,4 +36,10 @@ async function main() {
   if (!body.ok) process.exit(1);
 }
 
-main();
+main().catch(() => {
+  console.error(
+    "Couldn't reach api.telegram.org from this computer (some networks block it).\n" +
+      "Use the 'Set up Telegram webhook' button on the site's /admin page instead: it runs from the server.",
+  );
+  process.exit(1);
+});

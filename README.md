@@ -210,7 +210,9 @@ they're delivered; each channel stays hidden until its variables are set.
 
 1. Create a bot with @BotFather; set `TELEGRAM_BOT_TOKEN` and
    `TELEGRAM_BOT_USERNAME` (without @), plus a random `TELEGRAM_WEBHOOK_SECRET`.
-2. After deploying, point the bot at the site once:
+2. After deploying, point the bot at the site once: press **Set up Telegram
+   webhook** on `/admin` (runs from the server, so it works even where your
+   own network blocks `api.telegram.org`), or run:
 
    ```bash
    npm run telegram:setup -- https://your-site.example

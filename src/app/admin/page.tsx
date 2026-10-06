@@ -4,7 +4,8 @@ import { db } from "@/db";
 import { account } from "@/db/schema";
 import { auth, requireAdmin } from "@/lib/auth";
 import { Badge, Card, PageHeader, TableWrap, Th, Td } from "@/components/ui";
-import { BanToggle, ResetPasswordButton } from "@/components/AdminControls";
+import { BanToggle, ResetPasswordButton, SetupTelegramButton } from "@/components/AdminControls";
+import { getTelegramWebhookInfo, telegramConfigured } from "@/lib/user-notify";
 import { relativeTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,8 @@ export default async function AdminPage() {
     set.add(l.providerId);
     providersByUser.set(l.userId, set);
   }
+
+  const telegram = telegramConfigured() ? await getTelegramWebhookInfo() : null;
 
   return (
     <div className="flex flex-col gap-5">
@@ -100,6 +103,24 @@ export default async function AdminPage() {
           </table>
         </TableWrap>
       </Card>
+      {telegramConfigured() && (
+        <Card
+          title="Telegram bot"
+          subtitle="Tells Telegram where to deliver messages sent to the bot. Run once after deploying, and again if the site address changes."
+        >
+          <p className="mb-3 text-sm text-slate-600 dark:text-slate-400">
+            {telegram === null
+              ? "Couldn't read the bot's status from Telegram."
+              : telegram.url
+                ? <>Currently delivering to <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">{telegram.url}</code>.</>
+                : "Not set up yet."}
+            {telegram?.lastError && (
+              <span className="block text-rose-600 dark:text-rose-400">Last delivery error: {telegram.lastError}</span>
+            )}
+          </p>
+          <SetupTelegramButton />
+        </Card>
+      )}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { auth, getCurrentUser } from "@/lib/auth";
+import { setTelegramWebhook } from "@/lib/user-notify";
 
 export interface AdminActionState {
   ok: boolean;
@@ -66,4 +67,18 @@ export async function setBannedAction(formData: FormData) {
     await auth.api.unbanUser({ body: { userId }, headers: requestHeaders });
   }
   revalidatePath("/admin");
+}
+
+/** Same as `npm run telegram:setup`, but run from the server. */
+export async function setupTelegramAction(): Promise<AdminActionState> {
+  const denied = await adminOrError();
+  if (denied) return { ok: false, message: denied };
+  const host = (await headers()).get("host");
+  const siteUrl =
+    process.env.SITE_URL ??
+    process.env.BETTER_AUTH_URL ??
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : `https://${host}`);
+  return setTelegramWebhook(siteUrl);
 }

@@ -168,3 +168,51 @@ export async function deliverAlerts(fired: DeliverableAlert[], siteUrl?: string)
   }
   return { sent };
 }
+
+/**
+ * Point the bot's webhook at this site. Runs on the server (the admin page),
+ * so it works even where the admin's own network blocks api.telegram.org.
+ */
+export async function setTelegramWebhook(siteUrl: string): Promise<{ ok: boolean; message: string }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (!token || !secret) {
+    return { ok: false, message: "Set TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET first, then redeploy." };
+  }
+  if (!siteUrl.startsWith("https://")) {
+    return { ok: false, message: `Telegram needs an https address; this site is ${siteUrl}.` };
+  }
+  const url = `${siteUrl.replace(/\/+$/, "")}/api/telegram`;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url,
+        secret_token: secret,
+        allowed_updates: ["message"],
+        drop_pending_updates: true,
+      }),
+    });
+    const body = (await res.json()) as { ok: boolean; description?: string };
+    return body.ok
+      ? { ok: true, message: `Telegram will deliver messages to ${url}.` }
+      : { ok: false, message: `Telegram refused: ${body.description ?? res.status}` };
+  } catch {
+    return { ok: false, message: "Couldn't reach Telegram from the server." };
+  }
+}
+
+/** Where Telegram currently delivers the bot's messages, for the admin page. */
+export async function getTelegramWebhookInfo(): Promise<{ url: string; lastError: string | null } | null> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return null;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`, { cache: "no-store" });
+    const body = (await res.json()) as { ok: boolean; result?: { url?: string; last_error_message?: string } };
+    if (!body.ok) return null;
+    return { url: body.result?.url ?? "", lastError: body.result?.last_error_message ?? null };
+  } catch {
+    return null;
+  }
+}

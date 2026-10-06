@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import {
   resetPasswordAction,
   setBannedAction,
+  setupTelegramAction,
   type AdminActionState,
 } from "@/app/admin/actions";
 
@@ -59,6 +60,26 @@ export function BanToggle({ userId, banned }: { userId: string; banned: boolean 
       >
         {banned ? "Enable" : "Disable"}
       </button>
+    </form>
+  );
+}
+
+export function SetupTelegramButton() {
+  const [state, formAction, pending] = useActionState(setupTelegramAction, INITIAL);
+  return (
+    <form action={formAction} className="flex flex-col items-start gap-1">
+      <button
+        type="submit"
+        disabled={pending}
+        className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
+      >
+        {pending ? "Setting up…" : "Set up Telegram webhook"}
+      </button>
+      {state.message && (
+        <span className={`text-sm ${state.ok ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+          {state.message}
+        </span>
+      )}
     </form>
   );
 }
