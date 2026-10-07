@@ -18,6 +18,7 @@ import { decryptBackup, encryptBackup } from "@/lib/backup-crypto";
 import { computeIndexMovers } from "@/lib/index-movers";
 import { checkStaleness, periodReturns, streakOf } from "@/lib/dashboard-data";
 import { DASHBOARD_CARDS, cardOrder, hiddenCards } from "@/lib/dashboard-layout";
+import { afterCloseOf, missingSession } from "@/lib/ingest-guard";
 
 let failures = 0;
 function check(label: string, actual: unknown, expected: unknown) {
@@ -131,6 +132,19 @@ console.log("\n[6] Dashboard helpers");
   check("one missed day is tolerated", checkStaleness("2026-10-05", { status: "ok" }, now), null);
   check("one missed day after a failed run is reported", checkStaleness("2026-10-05", { status: "error" }, now)?.missedSessions, 1);
   check("two missed days are reported", checkStaleness("2026-10-02", { status: "ok" }, now)?.missedSessions, 2);
+
+  // Daily update guards. PKT = UTC+5. 2026-10-05 is a Monday.
+  check("after close is 15:45 PKT", afterCloseOf("2026-10-05").toISOString(), "2026-10-05T10:45:00.000Z");
+  check("Monday 7 PM PKT: waits until 8 PM before reporting",
+    missingSession("2026-10-02", new Date("2026-10-05T14:00:00Z")), null);
+  check("Monday 9 PM PKT with Friday's prices: Monday missing",
+    missingSession("2026-10-02", new Date("2026-10-05T16:00:00Z")), "2026-10-05");
+  check("Tuesday 7 AM PKT with Friday's prices: Monday missing",
+    missingSession("2026-10-02", new Date("2026-10-06T02:00:00Z")), "2026-10-05");
+  check("Monday's prices saved: nothing missing",
+    missingSession("2026-10-05", new Date("2026-10-05T16:00:00Z")), null);
+  check("Saturday with Friday's prices: nothing missing",
+    missingSession("2026-10-09", new Date("2026-10-10T08:00:00Z")), null);
 
   const defaults = DASHBOARD_CARDS.map((c) => c.id);
   check("no saved order gives the default", cardOrder({}), defaults);

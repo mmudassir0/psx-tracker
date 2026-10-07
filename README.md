@@ -265,11 +265,25 @@ private and delete it after use. `backups/` is git-ignored.
 
 ## Daily updates
 
-`.github/workflows/ingest.yml` runs `npm run ingest` at 11:00 UTC (16:00 PKT),
-Monday to Friday, against Turso. GitHub often starts scheduled jobs late, so
-expect the data between about 4 and 6 PM. It needs two repository secrets:
-`TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. Run it on demand from the
-**Actions** tab with **Run workflow**.
+`.github/workflows/ingest.yml` runs the update against Turso at 4, 5, 7 and 9 PM
+PKT on weekdays, and again at 7 AM PKT the next morning. GitHub often starts
+scheduled jobs hours late or skips them, so one slot is not enough. The extra
+runs are cheap and safe:
+
+- **During trading hours (9:32 AM to 3:30 PM PKT) a run saves nothing.** PSX only
+  shows today's snapshot, and half-day prices would be stored as the close.
+- **Once a session is saved after the close, later runs stop straight away.**
+- **The 7 AM run** catches the previous session if every evening run was
+  skipped (before the open PSX still shows yesterday's numbers).
+- **Admins get one phone notification** (and an email, if Resend is set up) when
+  a weekday's prices still aren't saved by 8 PM PKT, or when a run crashes. A
+  PSX holiday also triggers it once; ignore it on those days.
+
+It needs the repository secrets `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`,
+plus `SITE_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT`
+for phone notifications (both admin alerts and users' price alerts). Run it on
+demand from the **Actions** tab with **Run workflow**; a manual run always
+updates, unless the market is open.
 
 It runs on GitHub rather than as a Vercel Cron because PSX refuses requests
 from Vercel's servers (HTTP 462). For the same reason the **Refresh data**

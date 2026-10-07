@@ -1,11 +1,18 @@
 /**
  * EOD ingest. Run after market close (15:30 PKT).
  *
+ * With --trigger=schedule (GitHub Actions, several times a day) it never saves
+ * during trading hours, stops early once the session is captured, and tells
+ * the admins when a weekday's prices are still missing in the evening.
+ *
  *   npm run ingest                        # all indices, all fundamentals
  *   npm run ingest -- --indices=KMI30     # fundamentals for one index only
  *   npm run ingest -- --no-fundamentals   # quotes + membership only, fastest
  */
-import { runIngest, detectRecomposition } from "@/lib/psx/ingest";
+import { runIngest, detectRecomposition, resolveSessionDate } from "@/lib/psx/ingest";
+import { reportCrash, reportMissingSession, sessionCaptured } from "@/lib/ingest-guard";
+import { latestQuoteDate } from "@/lib/market";
+import { isMarketOpen } from "@/lib/dates";
 import { evaluateAlerts } from "@/lib/alerts";
 import { notifyAlerts, notifyIngestComplete } from "@/lib/notify";
 import { recordScreenHits } from "@/lib/screens";
@@ -32,6 +39,21 @@ async function main() {
   const triggerArg = flagValue("trigger");
   const trigger =
     triggerArg === "schedule" || triggerArg === "ui" ? triggerArg : "cli";
+  scheduled = trigger === "schedule";
+
+  if (scheduled) {
+    if (isMarketOpen()) {
+      console.log("Market is open: nothing saved, half-day prices would be stored as the close.");
+      await reportMissingSession(await latestQuoteDate());
+      return;
+    }
+    const session = await resolveSessionDate();
+    if (!process.argv.includes("--force") && (await sessionCaptured(session))) {
+      console.log(`Session ${session} is already saved after the close. Nothing to do.`);
+      await reportMissingSession(await latestQuoteDate());
+      return;
+    }
+  }
 
   const result = await runIngest({
     trigger,
@@ -112,10 +134,15 @@ async function main() {
     for (const e of result.errors.slice(0, 20)) console.log(`  ! ${e}`);
   }
 
+  if (scheduled) await reportMissingSession(await latestQuoteDate());
+
   console.log(`\ndone in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 }
 
-main().catch((err) => {
+let scheduled = false;
+
+main().catch(async (err) => {
   console.error("ingest failed:", err);
+  if (scheduled) await reportCrash(err).catch((e) => console.error("couldn't notify admins:", e));
   process.exit(1);
 });
