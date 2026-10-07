@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Card, PageHeader } from "@/components/ui";
 
-export const metadata = { title: "Privacy · KMI30 Tracker" };
+export const metadata = { title: "Privacy · PSX Tracker" };
 
 export default function PrivacyPage() {
   return (

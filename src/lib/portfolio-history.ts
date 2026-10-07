@@ -2,7 +2,7 @@ import { and, asc, eq, gte, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { indexLevels, quotesDaily } from "@/db/schema";
 import { listTransactions, type LedgerScope } from "@/lib/portfolio";
-import { TRACKED_INDEX } from "@/lib/psx/ingest";
+import { DEFAULT_INDEX } from "@/lib/psx/indices";
 
 export interface HistoryPoint {
   date: string;
@@ -11,7 +11,7 @@ export interface HistoryPoint {
   /** Cost basis of those positions (weighted average, like the holdings table). */
   invested: number;
   /**
-   * The same money in KMI30: every purchase buys index units on its date and
+   * The same money in the comparison index: every purchase buys index units on its date and
    * every sale withdraws its proceeds. Null until the index has a level.
    */
   benchmark: number | null;
@@ -105,6 +105,7 @@ export function replayLedger(
 export async function getPortfolioHistory(
   userId: string | null,
   scope: LedgerScope = {},
+  indexCode: string = DEFAULT_INDEX,
 ): Promise<HistoryPoint[]> {
   const ledger = await listTransactions(userId, scope);
   if (ledger.length === 0) return [];
@@ -122,7 +123,7 @@ export async function getPortfolioHistory(
     db
       .select({ date: indexLevels.date, current: indexLevels.current })
       .from(indexLevels)
-      .where(and(eq(indexLevels.indexCode, TRACKED_INDEX), gte(indexLevels.date, firstDate)))
+      .where(and(eq(indexLevels.indexCode, indexCode), gte(indexLevels.date, firstDate)))
       .all(),
   ]);
 

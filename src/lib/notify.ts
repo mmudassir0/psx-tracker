@@ -93,13 +93,13 @@ export function notifyAlerts(fired: FiredAlertLike[]): void {
 
   if (fired.length <= MAX_INDIVIDUAL) {
     for (const alert of fired) {
-      notify("KMI30 Tracker", alert.message, alert.symbol ?? undefined);
+      notify("PSX Tracker", alert.message, alert.symbol ?? undefined);
     }
     return;
   }
 
   notify(
-    "KMI30 Tracker",
+    "PSX Tracker",
     `${fired.length} alerts fired. Open the Alerts page for detail.`,
     fired[0].message,
   );
@@ -108,7 +108,7 @@ export function notifyAlerts(fired: FiredAlertLike[]): void {
 export function notifyIngestComplete(summary: string, hadErrors: boolean): void {
   if (!getNotifySettings().onIngestComplete) return;
   notify(
-    "KMI30 Tracker",
+    "PSX Tracker",
     summary,
     hadErrors ? "Completed with errors" : "Ingest complete",
   );

@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { buildRiskReport, MIN_OVERLAP } from "@/lib/risk";
-import { isDatabaseEmpty } from "@/lib/market";
+import { getTrackedIndexCodes, isDatabaseEmpty } from "@/lib/market";
+import { getBenchmarkIndex } from "@/lib/benchmark";
+import { BenchmarkPicker } from "@/components/BenchmarkPicker";
 import { getPortfolio } from "@/lib/portfolio";
-import { indexLabel } from "@/lib/psx/indices";
+import { BENCHMARK_CHOICES, indexLabel } from "@/lib/psx/indices";
 import { CorrelationMatrix } from "@/components/CorrelationMatrix";
 import { DivergingBars } from "@/components/DivergingBars";
 import {
@@ -46,7 +48,8 @@ export default async function RiskPage({
     : "365";
   const days = WINDOWS.find((w) => w.key === windowKey)!.days;
 
-  const portfolio = await getPortfolio(user.id);
+  const [benchmark, tracked] = await Promise.all([getBenchmarkIndex(user.id), getTrackedIndexCodes()]);
+  const portfolio = await getPortfolio(user.id, {}, benchmark);
   const open = portfolio.holdings.filter((h) => h.quantity > 0);
 
   if (open.length === 0) {
@@ -66,7 +69,7 @@ export default async function RiskPage({
     );
   }
 
-  const report = await buildRiskReport({ userId: user.id, days });
+  const report = await buildRiskReport({ userId: user.id, indexCode: benchmark, days });
 
   // Herfindahl: 1/n is perfectly even, 1 is everything in one name.
   const evenHhi = open.length > 0 ? 1 / open.length : 0;
@@ -108,6 +111,11 @@ export default async function RiskPage({
           </a>
         ))}
       </div>
+      <BenchmarkPicker
+        current={benchmark}
+        codes={BENCHMARK_CHOICES.filter((c) => tracked.includes(c))}
+        back={`/risk?window=${windowKey}`}
+      />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile

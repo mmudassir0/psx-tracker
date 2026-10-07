@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { quotesDaily } from "@/db/schema";
 import { getConstituents, getIndexHistory } from "@/lib/market";
 import { getPortfolio } from "@/lib/portfolio";
-import { TRACKED_INDEX } from "@/lib/psx/ingest";
+import { DEFAULT_INDEX } from "@/lib/psx/indices";
 
 export type Weighting = "index" | "equal";
 export type RebalanceFrequency = "none" | "monthly" | "quarterly" | "annually";
@@ -89,7 +89,7 @@ function isRebalanceBoundary(
 
 export async function runBacktest(options: BacktestOptions): Promise<BacktestResult> {
   const {
-    indexCode = TRACKED_INDEX,
+    indexCode = DEFAULT_INDEX,
     startDate,
     initialCapital = 1_000_000,
     weighting = "index",
@@ -302,7 +302,7 @@ export interface RebalancePlan {
 
 export async function planRebalance({
   userId,
-  indexCode = TRACKED_INDEX,
+  indexCode = DEFAULT_INDEX,
   weighting = "index",
   tolerancePct = 0.5,
   includeMissing = false,
@@ -313,7 +313,7 @@ export async function planRebalance({
   tolerancePct?: number;
   includeMissing?: boolean;
 }): Promise<RebalancePlan> {
-  const portfolio = await getPortfolio(userId);
+  const portfolio = await getPortfolio(userId, {}, indexCode);
   const constituents = await getConstituents(indexCode);
   const held = portfolio.holdings.filter((h) => h.quantity > 0);
   const portfolioValue = held.reduce((sum, h) => sum + (h.marketValue ?? 0), 0);

@@ -74,7 +74,7 @@ export default async function ScreensPage() {
         <StatTile
           label="Universe"
           value="Whole market"
-          hint="~494 symbols, not just KMI30"
+          hint="Every listed stock"
         />
       </div>
 

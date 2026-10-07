@@ -1,6 +1,6 @@
 import { getConstituents } from "@/lib/market";
 import { getPortfolio } from "@/lib/portfolio";
-import { TRACKED_INDEX } from "@/lib/psx/ingest";
+import { DEFAULT_INDEX } from "@/lib/psx/indices";
 
 export const PARTICIPATION_RATE = 0.2;
 
@@ -38,7 +38,7 @@ export interface LiquidityReport {
 
 export async function buildLiquidityReport({
   userId,
-  indexCode = TRACKED_INDEX,
+  indexCode = DEFAULT_INDEX,
   heldOnly = false,
 }: {
   userId: string | null;
@@ -46,7 +46,7 @@ export async function buildLiquidityReport({
   heldOnly?: boolean;
 }): Promise<LiquidityReport> {
   const constituents = await getConstituents(indexCode);
-  const portfolio = await getPortfolio(userId);
+  const portfolio = await getPortfolio(userId, {}, indexCode);
   const held = new Map(
     portfolio.holdings
       .filter((h) => h.quantity > 0)

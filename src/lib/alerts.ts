@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { alerts, alertEvents } from "@/db/schema";
-import { getConstituents, latestQuoteDate } from "@/lib/market";
+import { getAllSymbolViews, latestQuoteDate } from "@/lib/market";
 import { detectRecomposition } from "@/lib/psx/ingest";
 import { getHoldings } from "@/lib/portfolio";
 import { todayPkt } from "@/lib/dates";
@@ -45,9 +45,11 @@ export async function evaluateAlerts(userId?: string): Promise<FiredAlert[]> {
     .all();
   if (rules.length === 0) return [];
 
-  const constituents = await getConstituents();
-  const bySymbol = new Map(constituents.map((c) => [c.symbol, c]));
-  const recomposition = await detectRecomposition();
+  // Every listed stock, so price and P/E alerts work outside any one index.
+  const views = await getAllSymbolViews();
+  const bySymbol = new Map(views.map((c) => [c.symbol, c]));
+  // Membership alerts are about KMI30's Shariah screen specifically.
+  const recomposition = await detectRecomposition("KMI30");
 
   // Portfolio-wide rules watch the rule owner's own holdings.
   const heldByUser = new Map<string, Set<string>>();

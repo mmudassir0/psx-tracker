@@ -57,7 +57,7 @@ const GROUPS: NavGroup[] = [
       {
         href: "/screener",
         label: "Screener",
-        hint: "Sort and filter constituents",
+        hint: "Sort and filter any index",
       },
       {
         href: "/liquidity",
@@ -139,6 +139,9 @@ export function NavLinks({
     <nav ref={navRef} className="flex flex-wrap items-center gap-1 text-sm">
       <Link href="/" className={linkClass(pathname === "/")}>
         Dashboard
+      </Link>
+      <Link href="/heatmap" className={linkClass(pathname === "/heatmap")}>
+        Heatmap
       </Link>
 
       {GROUPS.map((group) => {

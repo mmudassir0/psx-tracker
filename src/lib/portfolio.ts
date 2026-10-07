@@ -3,6 +3,7 @@ import { and, asc, desc, eq, lte, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { transactions } from "@/db/schema";
 import { getAllSymbolViews, getConstituents, type ConstituentView } from "@/lib/market";
+import { DEFAULT_INDEX } from "@/lib/psx/indices";
 import { ensureDefaultPortfolio, ownsPortfolio } from "@/lib/portfolios";
 import { txKey, type ImportedTx } from "@/lib/csv-import";
 
@@ -33,11 +34,11 @@ export interface HoldingView extends Holding {
   totalPnl: number | null;
   /** Share of portfolio market value, 0-100. */
   portfolioWeightPct: number | null;
-  /** Share of KMI30 by free-float cap, 0-100. */
+  /** Share of the comparison index by free-float cap, 0-100. */
   indexWeightPct: number | null;
   /** portfolioWeight - indexWeight. Positive = overweight vs the index. */
   activeWeightPct: number | null;
-  /** True when the name is not (or no longer) a KMI30 constituent. */
+  /** True when the name is not (or no longer) in the comparison index. */
   droppedFromIndex: boolean;
 }
 
@@ -60,7 +61,7 @@ export interface PortfolioSummary {
     activeWeightPct: number;
     marketValue: number;
   }[];
-  /** Names held that have left KMI30 — the Shariah-compliance watch list. */
+  /** Names held that are outside the comparison index (for KMI30, the Shariah watch list). */
   droppedHoldings: string[];
 }
 
@@ -156,13 +157,14 @@ export async function getHoldings(
 export async function getPortfolio(
   userId: string | null,
   scope: LedgerScope = {},
+  indexCode: string = DEFAULT_INDEX,
 ): Promise<PortfolioSummary> {
   const holdings = await getHoldings(userId, scope);
   if (holdings.length === 0) return emptyPortfolio();
 
-  // Prices come from every listed symbol, not just KMI30: a holding outside
-  // the index still has a price. KMI30 supplies index weights only.
-  const [allSymbols, constituents] = await Promise.all([getAllSymbolViews(), getConstituents()]);
+  // Prices come from every listed symbol: a holding outside the index still
+  // has a price. The comparison index supplies index weights only.
+  const [allSymbols, constituents] = await Promise.all([getAllSymbolViews(), getConstituents(indexCode)]);
   const priced = new Map<string, ConstituentView>(allSymbols.map((c) => [c.symbol, c]));
   const inIndex = new Map<string, ConstituentView>(constituents.map((c) => [c.symbol, c]));
 

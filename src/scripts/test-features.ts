@@ -16,6 +16,8 @@ import {
 import { replayLedger } from "@/lib/portfolio-history";
 import { decryptBackup, encryptBackup } from "@/lib/backup-crypto";
 import { computeIndexMovers } from "@/lib/index-movers";
+import { checkStaleness, periodReturns, streakOf } from "@/lib/dashboard-data";
+import { DASHBOARD_CARDS, cardOrder, hiddenCards } from "@/lib/dashboard-layout";
 
 let failures = 0;
 function check(label: string, actual: unknown, expected: unknown) {
@@ -104,7 +106,41 @@ console.log("\n[5] What moved the index");
   check("no level, no rows", computeIndexMovers([{ symbol: "A", name: null, close: 11, ldcp: 10, freeFloatShares: 1 }], null).rows.length, 0);
 }
 
-console.log("\n[6] Backup encryption");
+console.log("\n[6] Dashboard helpers");
+{
+  check("up streak", streakOf([10, 11, 12, 13]), 3);
+  check("down streak stops at an up day", streakOf([10, 12, 11, 10]), -2);
+  check("flat close ends a streak", streakOf([10, 11, 11]), 0);
+  check("one close, no streak", streakOf([10]), 0);
+
+  const hist = [
+    { date: "2025-10-06", current: 100 },
+    { date: "2025-12-31", current: 110 },
+    { date: "2026-09-04", current: 120 },
+    { date: "2026-09-29", current: 125 },
+    { date: "2026-10-06", current: 132 },
+  ];
+  check("period returns", periodReturns(hist).map((r) => [r.label, r.pct == null ? null : Math.round(r.pct * 10) / 10]), [
+    ["1W", 5.6], ["1M", 10], ["3M", 20], ["YTD", 20], ["1Y", 32],
+  ]);
+  check("too short a history gives no 1Y", periodReturns(hist.slice(2))[4].pct, null);
+
+  // Tuesday 2026-10-06 19:00 PKT: Tuesday's session is expected.
+  const now = new Date("2026-10-06T14:00:00Z");
+  check("current data is fine", checkStaleness("2026-10-06", { status: "ok" }, now), null);
+  check("one missed day is tolerated", checkStaleness("2026-10-05", { status: "ok" }, now), null);
+  check("one missed day after a failed run is reported", checkStaleness("2026-10-05", { status: "error" }, now)?.missedSessions, 1);
+  check("two missed days are reported", checkStaleness("2026-10-02", { status: "ok" }, now)?.missedSessions, 2);
+
+  const defaults = DASHBOARD_CARDS.map((c) => c.id);
+  check("no saved order gives the default", cardOrder({}), defaults);
+  const order = cardOrder({ order: ["constituents", "bogus", "heatmap", "heatmap"] });
+  check("saved cards first, unknown and repeated dropped", order.slice(0, 2), ["constituents", "heatmap"]);
+  check("new cards still appear", order.length, defaults.length);
+  check("unknown hidden ids ignored", [...hiddenCards({ hidden: ["breadth", "nope"] })], ["breadth"]);
+}
+
+console.log("\n[7] Backup encryption");
 const secret = "correct horse battery staple";
 const sample = JSON.stringify({ tables: { user: [{ email: "a@b.c" }] } });
 const sealed = encryptBackup(sample, secret);

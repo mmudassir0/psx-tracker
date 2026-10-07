@@ -24,10 +24,20 @@ const RANGES = [
 const SERIES = [
   { key: "value", label: "Market value", colour: "var(--series-1)", dash: undefined },
   { key: "invested", label: "Invested", colour: "var(--chart-muted)", dash: "4 3" },
-  { key: "benchmark", label: "Same money in KMI30", colour: "var(--series-2, #c2410c)", dash: undefined },
+  { key: "benchmark", label: "Same money in the index", colour: "var(--series-2, #c2410c)", dash: undefined },
 ] as const;
 
-export function PortfolioHistoryChart({ data }: { data: HistoryPoint[] }) {
+export function PortfolioHistoryChart({
+  data,
+  indexCode = "KSE100",
+}: {
+  data: HistoryPoint[];
+  /** Index the benchmark line buys into. */
+  indexCode?: string;
+}) {
+  const series = SERIES.map((s) =>
+    s.key === "benchmark" ? { ...s, label: `Same money in ${indexCode}` } : s,
+  );
   const [rangeKey, setRangeKey] = useState<string>("Max");
 
   const filtered = useMemo(() => {
@@ -53,7 +63,7 @@ export function PortfolioHistoryChart({ data }: { data: HistoryPoint[] }) {
     <div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <ul className="flex flex-wrap gap-4 text-xs text-slate-600 dark:text-slate-400">
-          {SERIES.map((s) => (
+          {series.map((s) => (
             <li key={s.key} className="flex items-center gap-1.5">
               <svg width="18" height="6" aria-hidden>
                 <line x1="0" y1="3" x2="18" y2="3" stroke={s.colour} strokeWidth="2" strokeDasharray={s.dash} />
@@ -92,7 +102,7 @@ export function PortfolioHistoryChart({ data }: { data: HistoryPoint[] }) {
                 return (
                   <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs shadow-lg dark:border-slate-700 dark:bg-slate-800">
                     <div className="text-slate-500 dark:text-slate-400">{prettyDate(p.date)}</div>
-                    {SERIES.map((s) => (
+                    {series.map((s) => (
                       <div key={s.key} className="tabular mt-0.5">
                         {s.label}: <span className="font-medium">{p[s.key] == null ? "—" : money(p[s.key] as number)}</span>
                       </div>
@@ -101,7 +111,7 @@ export function PortfolioHistoryChart({ data }: { data: HistoryPoint[] }) {
                 );
               }}
             />
-            {SERIES.map((s) => (
+            {series.map((s) => (
               <Line key={s.key} type="monotone" dataKey={s.key} stroke={s.colour} strokeWidth={2}
                 strokeDasharray={s.dash} dot={false} isAnimationActive={false} connectNulls />
             ))}
@@ -109,7 +119,7 @@ export function PortfolioHistoryChart({ data }: { data: HistoryPoint[] }) {
         </ResponsiveContainer>
       </div>
       <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-        Price only: dividends are not added to the value line. The KMI30 line buys the index
+        Price only: dividends are not added to the value line. The {indexCode} line buys the index
         with each purchase and sells it with each sale, so timing is compared fairly.
       </p>
     </div>

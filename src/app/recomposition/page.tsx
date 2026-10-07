@@ -9,7 +9,6 @@ import { isDatabaseEmpty, getTrackedIndexCodes } from "@/lib/market";
 import {
   getIndexMeta,
   sortIndexCodes,
-  DEFAULT_INDEX,
 } from "@/lib/psx/indices";
 import {
   Card,
@@ -45,7 +44,8 @@ export default async function RecompositionPage({
   const indexCode =
     indexParam && available.includes(indexParam.toUpperCase())
       ? indexParam.toUpperCase()
-      : DEFAULT_INDEX;
+      : // Membership changes matter most for KMI30's Shariah screen.
+        "KMI30";
   const meta = getIndexMeta(indexCode);
 
   const events = await getRecompositionHistory(indexCode);

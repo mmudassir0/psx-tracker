@@ -3,7 +3,10 @@ import { requireUser } from "@/lib/auth";
 import { getPortfolio, listTransactions } from "@/lib/portfolio";
 import { ensureDefaultPortfolio, listPortfolios } from "@/lib/portfolios";
 import { getPortfolioHistory } from "@/lib/portfolio-history";
-import { getConstituents, isDatabaseEmpty } from "@/lib/market";
+import { getConstituents, getTrackedIndexCodes, isDatabaseEmpty } from "@/lib/market";
+import { getBenchmarkIndex } from "@/lib/benchmark";
+import { BENCHMARK_CHOICES, SHARIAH_INDEX_CODES } from "@/lib/psx/indices";
+import { BenchmarkPicker } from "@/components/BenchmarkPicker";
 import { deleteTransactionAction, moveTransactionAction } from "@/app/actions";
 import { TransactionForm } from "@/components/TransactionForm";
 import { DividendForm } from "@/components/DividendForm";
@@ -57,11 +60,14 @@ export default async function PortfolioPage({
   // With a single portfolio, "all" and that portfolio are the same view.
   const editable = selected ?? (portfolios.length === 1 ? portfolios[0] : null);
 
+  const [benchmark, tracked] = await Promise.all([getBenchmarkIndex(user.id), getTrackedIndexCodes()]);
+  const shariahBenchmark = SHARIAH_INDEX_CODES.includes(benchmark);
   const [portfolio, ledger, constituents, history] = await Promise.all([
-    getPortfolio(user.id, scope),
+    getPortfolio(user.id, scope, benchmark),
     listTransactions(user.id, scope),
-    getConstituents(),
-    getPortfolioHistory(user.id, scope),
+    // Any listed stock can be recorded, not just index members.
+    getConstituents("ALLSHR"),
+    getPortfolioHistory(user.id, scope, benchmark),
   ]);
   const openPositions = portfolio.holdings.filter((h) => h.quantity > 0);
   const heldSymbols = [
@@ -104,12 +110,17 @@ export default async function PortfolioPage({
           </span>
         </div>
         {editable && <EditPortfolioForm key={editable.id} portfolioId={editable.id} name={editable.name} />}
+        <BenchmarkPicker
+          current={benchmark}
+          codes={BENCHMARK_CHOICES.filter((c) => tracked.includes(c))}
+          back={selected ? `/portfolio?p=${selected.id}` : "/portfolio"}
+        />
       </div>
 
-      {portfolio.droppedHoldings.length > 0 && (
+      {shariahBenchmark && portfolio.droppedHoldings.length > 0 && (
         <div className="rounded-xl border border-rose-300 bg-rose-50 p-4 text-sm dark:border-rose-800 dark:bg-rose-950/40">
           <p className="font-medium">
-            ⚠️ Holdings not in KMI30:{" "}
+            ⚠️ Holdings not in {benchmark}:{" "}
             {portfolio.droppedHoldings.join(", ")}
           </p>
           <p className="mt-1">
@@ -162,7 +173,7 @@ export default async function PortfolioPage({
 
       {history.length >= 2 && (
         <Card title="Value over time" subtitle="Daily close of the positions held each day">
-          <PortfolioHistoryChart data={history} />
+          <PortfolioHistoryChart data={history} indexCode={benchmark} />
         </Card>
       )}
 
@@ -185,7 +196,7 @@ export default async function PortfolioPage({
         <>
           <Card
             title="Holdings"
-            subtitle="Active weight is your weight minus the index weight — positive means overweight."
+            subtitle={`Active weight is your weight minus the ${benchmark} weight — positive means overweight.`}
           >
             <TableWrap>
               <table className="w-full text-sm">
@@ -211,8 +222,8 @@ export default async function PortfolioPage({
                       <Td>
                         <div className="flex items-center gap-1.5">
                           <SymbolLink symbol={h.symbol} />
-                          {h.droppedFromIndex && (
-                            <Badge tone="critical">dropped</Badge>
+                          {shariahBenchmark && h.droppedFromIndex && (
+                            <Badge tone="critical">not in {benchmark}</Badge>
                           )}
                         </div>
                       </Td>
@@ -244,7 +255,7 @@ export default async function PortfolioPage({
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Card
-              title="Active weight vs KMI30"
+              title={`Active weight vs ${benchmark}`}
               subtitle="How far each position sits above or below its index weight"
             >
               <DivergingBars

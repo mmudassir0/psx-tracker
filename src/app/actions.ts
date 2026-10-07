@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { headers } from "next/headers";
-import { auth, getCurrentUser, getCurrentUserId } from "@/lib/auth";
+import { auth, getCurrentUser, getCurrentUserId, safeNextPath } from "@/lib/auth";
 import {
   addTransaction,
   deleteTransaction,
@@ -40,7 +40,8 @@ import { desc } from "drizzle-orm";
 import { db } from "@/db";
 import { ingestRuns, watchlist } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
-import { setUserSetting } from "@/lib/settings";
+import { getUserSetting, setUserSetting } from "@/lib/settings";
+import { isCardId, type DashboardPrefs } from "@/lib/dashboard-layout";
 import { notifyAlerts } from "@/lib/notify";
 import {
   isValidSubscription,
@@ -298,7 +299,7 @@ export type IngestScope = "quick" | "kmi30" | "full";
 
 const SCOPE_LABELS: Record<IngestScope, string> = {
   quick: "Quotes & membership only",
-  kmi30: "KMI30 fundamentals",
+  kmi30: "KSE100 company data",
   full: "Everything",
 };
 
@@ -383,7 +384,7 @@ export async function startIngestAction(
         ? {
             includeFundamentals: true,
             fundamentalScope: "indices" as const,
-            fundamentalIndices: ["KMI30"],
+            fundamentalIndices: ["KSE100"],
           }
         : { includeFundamentals: true };
 
@@ -811,7 +812,34 @@ export async function setDashboardIndexAction(formData: FormData) {
   const code = String(formData.get("index") ?? "").toUpperCase();
   const { getTrackedIndexCodes } = await import("@/lib/market");
   if (!(await getTrackedIndexCodes()).includes(code)) return;
-  await setUserSetting(userId, "dashboard", { index: code });
+  const current = await getUserSetting<DashboardPrefs>(userId, "dashboard", { index: code });
+  await setUserSetting(userId, "dashboard", { ...current, index: code });
   revalidatePath("/");
   redirect("/");
+}
+
+/** The index this user's portfolio, history line and beta compare against. */
+export async function setBenchmarkAction(formData: FormData) {
+  const userId = await userIdOrThrow();
+  const code = String(formData.get("index") ?? "").toUpperCase();
+  const back = safeNextPath(String(formData.get("back") ?? "/portfolio"));
+  const { getTrackedIndexCodes } = await import("@/lib/market");
+  if (!(await getTrackedIndexCodes()).includes(code)) return;
+  await setUserSetting(userId, "benchmark", { index: code });
+  revalidatePath("/", "layout");
+  redirect(back);
+}
+
+/** Which dashboard cards show, and in what order. Saved per account. */
+export async function saveDashboardCardsAction(input: { order: string[]; hidden: string[] }) {
+  const userId = await userIdOrThrow();
+  const clean = (ids: unknown) =>
+    Array.isArray(ids) ? [...new Set(ids.map(String).filter(isCardId))] : [];
+  const current = await getUserSetting<DashboardPrefs>(userId, "dashboard", { index: "" });
+  await setUserSetting(userId, "dashboard", {
+    ...current,
+    order: clean(input.order),
+    hidden: clean(input.hidden),
+  });
+  revalidatePath("/");
 }

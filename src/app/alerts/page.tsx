@@ -39,7 +39,7 @@ export default async function AlertsPage() {
 
   const alerts = await listAlerts(user.id);
   const events = await listAlertEvents(user.id, 60);
-  const constituents = await getConstituents();
+  const constituents = await getConstituents("ALLSHR");
   const unacknowledged = events.filter((e) => !e.acknowledged);
 
   return (

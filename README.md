@@ -1,8 +1,9 @@
-# KMI30 Tracker
+# PSX Tracker
 
-A personal dashboard for the Pakistan Stock Exchange, built around **KMI30** —
-the Shariah-screened index of 30 companies — but covering **all 17 PSX indices**
-and every company in them. No third-party data subscription: everything comes
+A research dashboard for the Pakistan Stock Exchange covering **all 17 PSX
+indices** and every listed company, with a whole-market heatmap, your own
+portfolios and alerts. KSE100 is the default index; Shariah investors can switch
+to KMI30 and get its recomposition alerts. No third-party data subscription: everything comes
 from the public PSX data portal.
 
 It runs on Vercel with a Turso (hosted SQLite) database, updated every weekday
@@ -14,14 +15,15 @@ It reports market data and your own numbers. It does not give investment advice.
 
 | Page | What you get |
 |---|---|
-| **Dashboard** | KMI30 level, advancers/decliners, day-change bars, sector weights, constituent table |
+| **Dashboard** | Any tracked index (save your default): level and 1W–1Y returns, market heatmap, what moved the index in points, sectors today, whole-market gainers/losers, 52-week extremes and streaks, rising vs falling stocks over time, constituents with 30-session sparklines. Logged in: Your day, watchlist at a glance, portfolio vs your comparison index, holdings marked, and "Choose cards" to hide or reorder cards. A banner warns when prices are out of date |
+| **Heatmap** | Every company with a market cap (about 460) as a box sized by market cap, grouped by sector, coloured by the change over today, 1W, 1M, YTD or 1Y. Narrow it to any index; sector rollup and leaders/laggards among the 100 largest |
 | **Indices** | All 17 PSX indices with level, change and member count |
 | **Index** | Any index's level chart, constituents, weights, sector mix, day-change bars and membership changes |
 | **Screens** | 14 saved screens run on every ingest across the whole market, with a daily diff of what newly entered each one |
 | **Movers & breadth** | Market-wide gainers, losers, most traded (30-day average value), plus advance/decline breadth |
-| **Screener** | Sort/filter on P/E, YTD, 1Y, weight, market cap, 30-day average volume, distance off 52-week high |
+| **Screener** | Pick any index (ALLSHR for the whole market), then sort/filter on P/E, YTD, 1Y, weight, market cap, 30-day average volume, distance off 52-week high |
 | **Symbol** | Price history since 2021, key stats, dividend yield, past payouts with book-closure dates, 4 years of financials and ratios, announcement feed, your position |
-| **Portfolio** | Several named portfolios per account (or all combined), holdings with weighted-average cost, unrealised/realised P&L, dividend income, **your weight vs index weight**, value over time against the same money in KMI30, a dividend recorder, and CSV import from your broker |
+| **Portfolio** | Several named portfolios per account (or all combined), holdings with weighted-average cost, unrealised/realised P&L, dividend income, **your weight vs index weight**, value over time against the same money in your **comparison index** (KSE100 by default; pick KSE30, ALLSHR, KMI30 or KMIALLSHR), a dividend recorder, and CSV import from your broker |
 | **Strategy** | Backtest an index basket against the index itself, and get the exact trades to move your portfolio onto those weights |
 | **Risk** | Correlation matrix, beta vs index, and concentration — whether your positions are actually diversified |
 | **Liquidity** | 30-day average traded value per name, and how many sessions a position would take to exit |
@@ -185,7 +187,7 @@ when empty, and the last one never, so a misclick can't remove trades.
 Tax (CGT) and zakat always combine every portfolio, since both are per person.
 
 **Value over time** replays the ledger over daily closes: market value, cost
-basis, and the same money in KMI30 (each purchase buys index units on its
+basis, and the same money in your comparison index (each purchase buys index units on its
 date, each sale withdraws its proceeds), so timing is compared fairly. Price
 only; dividends are not added to the value line.
 
@@ -462,7 +464,7 @@ src/
     auth.ts             Accounts (Better Auth): sessions, Google, admin, bot check
     portfolio.ts        Weighted-average cost engine, per user and portfolio
     portfolios.ts       Named portfolios: create, rename, delete-when-empty
-    portfolio-history.ts  Daily value replay and the KMI30 comparison
+    portfolio-history.ts  Daily value replay and the index comparison
     csv-import.ts       Broker CSV parsing and column guessing
     account-data.ts     Export and deletion of one user's data
     user-notify.ts      Telegram and email alert delivery

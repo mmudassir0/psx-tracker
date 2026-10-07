@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { quotesDaily } from "@/db/schema";
 import { getIndexHistory } from "@/lib/market";
 import { getPortfolio } from "@/lib/portfolio";
-import { TRACKED_INDEX } from "@/lib/psx/ingest";
+import { DEFAULT_INDEX } from "@/lib/psx/indices";
 import { addDays, todayPkt } from "@/lib/dates";
 
 export const MIN_OVERLAP = 30;
@@ -168,11 +168,11 @@ export interface RiskReport {
 
 export async function buildRiskReport({
   userId,
-  indexCode = TRACKED_INDEX,
+  indexCode = DEFAULT_INDEX,
   days = 365,
 }: { userId: string | null; indexCode?: string; days?: number }): Promise<RiskReport> {
   const fromDate = addDays(todayPkt(), -days);
-  const portfolio = await getPortfolio(userId);
+  const portfolio = await getPortfolio(userId, {}, indexCode);
   const open = portfolio.holdings.filter((h) => h.quantity > 0);
   const wanted = open.map((h) => h.symbol);
 

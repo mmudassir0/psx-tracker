@@ -20,12 +20,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "KMI30 Tracker",
+  title: "PSX Tracker",
   description:
-    "Personal dashboard for PSX KMI30 constituents, portfolio and Shariah recomposition tracking.",
+    "Pakistan Stock Exchange research: every index, a whole-market heatmap, your portfolio and alerts.",
   // Installed on an iPhone home screen it opens like an app, which iOS
   // requires before a site may send push notifications.
-  appleWebApp: { capable: true, title: "KMI30", statusBarStyle: "default" },
+  appleWebApp: { capable: true, title: "PSX Tracker", statusBarStyle: "default" },
   icons: {
     icon: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }],
     apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
@@ -59,7 +59,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           <header className="flex flex-col gap-4 border-b border-slate-200 py-5 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
             <Link href="/" className="flex items-baseline gap-2">
               <span className="text-lg font-semibold tracking-tight">
-                KMI30 Tracker
+                PSX Tracker
               </span>
               <span className="text-xs text-slate-500 dark:text-slate-400">
                 Pakistan Stock Exchange

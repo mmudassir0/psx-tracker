@@ -9,7 +9,7 @@ import {
   constituents,
   ingestRuns,
 } from "@/db/schema";
-import { TRACKED_INDEX } from "@/lib/psx/ingest";
+
 import { startOfYear } from "@/lib/dates";
 import { getTrailingDividendMap } from "@/lib/dividends";
 import {
@@ -18,7 +18,7 @@ import {
   METRIC_EPS_GROWTH,
   METRIC_NET_MARGIN,
 } from "@/lib/financials";
-import { SHARIAH_INDEX_CODES } from "@/lib/psx/indices";
+import { DEFAULT_INDEX, SHARIAH_INDEX_CODES } from "@/lib/psx/indices";
 
 export interface ConstituentView {
   symbol: string;
@@ -68,7 +68,7 @@ async function latestQuoteDateUncached(): Promise<string | null> {
 
 /** Most recent date on which we captured a membership snapshot for an index. */
 async function latestConstituentDateUncached(
-  indexCode: string = TRACKED_INDEX,
+  indexCode: string = DEFAULT_INDEX,
 ): Promise<string | null> {
   const row = await db
     .select({ date: constituents.date })
@@ -272,7 +272,7 @@ async function fetchBulkViewMaps(
 }
 
 async function getConstituentsUncached(
-  indexCode: string = TRACKED_INDEX,
+  indexCode: string = DEFAULT_INDEX,
 ): Promise<ConstituentView[]> {
   const memberDate = await latestConstituentDate(indexCode);
   if (!memberDate) return [];
@@ -313,7 +313,7 @@ async function getConstituentsUncached(
 
 export async function getConstituent(
   symbol: string,
-  indexCode: string = TRACKED_INDEX,
+  indexCode: string = DEFAULT_INDEX,
 ): Promise<ConstituentView | null> {
   const quoteDate = await latestQuoteDate();
   const maps = await fetchBulkViewMaps([symbol], quoteDate);
@@ -387,7 +387,7 @@ export async function getPriceHistory(
 }
 
 export async function getIndexHistory(
-  indexCode = TRACKED_INDEX,
+  indexCode = DEFAULT_INDEX,
   fromDate?: string,
 ): Promise<{ date: string; current: number }[]> {
   const where = fromDate
@@ -405,7 +405,7 @@ export async function getIndexHistory(
     .all();
 }
 
-export async function getLatestIndexLevel(indexCode = TRACKED_INDEX) {
+export async function getLatestIndexLevel(indexCode = DEFAULT_INDEX) {
   return (
     (await db
       .select()
@@ -634,11 +634,11 @@ export async function getMovers(
 // Outside a server render, cache() is a pass-through.
 export const latestQuoteDate = cache(latestQuoteDateUncached);
 const latestConstituentDateCached = cache(latestConstituentDateUncached);
-export const latestConstituentDate = (arg: Parameters<typeof latestConstituentDateUncached>[0] = TRACKED_INDEX) =>
+export const latestConstituentDate = (arg: Parameters<typeof latestConstituentDateUncached>[0] = DEFAULT_INDEX) =>
   latestConstituentDateCached(arg);
 export const getTrackedIndexCodes = cache(getTrackedIndexCodesUncached);
 const getConstituentsCached = cache(getConstituentsUncached);
-export const getConstituents = (arg: Parameters<typeof getConstituentsUncached>[0] = TRACKED_INDEX) =>
+export const getConstituents = (arg: Parameters<typeof getConstituentsUncached>[0] = DEFAULT_INDEX) =>
   getConstituentsCached(arg);
 export const isDatabaseEmpty = cache(isDatabaseEmptyUncached);
 export const getAllSymbolViews = cache(getAllSymbolViewsUncached);

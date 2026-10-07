@@ -68,18 +68,18 @@ const CATALOGUE: Record<string, Omit<IndexMeta, "code">> = {
 
 /** Indices whose level PSX quotes, in a sensible reading order. */
 export const PREFERRED_ORDER = [
-  "KMI30",
-  "KMIALLSHR",
   "KSE100",
   "KSE30",
   "ALLSHR",
+  "KMI30",
+  "KMIALLSHR",
   "PSXDIV20",
   "BKTI",
   "OGTI",
   "KSE100PR",
 ];
 
-export const DEFAULT_INDEX = "KMI30";
+export const DEFAULT_INDEX = "KSE100";
 
 /** Indices that are Shariah-screened by construction. */
 export const SHARIAH_INDEX_CODES = ["KMI30", "KMIALLSHR"];
@@ -110,3 +110,6 @@ export function sortIndexCodes(codes: string[]): string[] {
     return a.localeCompare(b);
   });
 }
+
+/** Broad indices offered as a portfolio's comparison index. */
+export const BENCHMARK_CHOICES = ["KSE100", "KSE30", "ALLSHR", "KMI30", "KMIALLSHR"];

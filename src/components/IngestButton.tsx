@@ -12,7 +12,7 @@ import {
 
 const SCOPES: { key: IngestScope; label: string; hint: string }[] = [
   { key: "quick", label: "Quick", hint: "Quotes & membership · ~5s" },
-  { key: "kmi30", label: "KMI30", hint: "KMI30 fundamentals · ~30s" },
+  { key: "kmi30", label: "KSE100", hint: "KSE100 company data · ~1.5min" },
   { key: "full", label: "Full", hint: "Everything · ~4min" },
 ];
 

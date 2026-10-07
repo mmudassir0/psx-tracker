@@ -14,6 +14,7 @@ import {
   latestQuoteDate,
 } from "@/lib/market";
 import { getPortfolio } from "@/lib/portfolio";
+import { SHARIAH_INDEX_CODES, sortIndexCodes } from "@/lib/psx/indices";
 import { PriceChart } from "@/components/PriceChart";
 import {
   Card,
@@ -70,7 +71,8 @@ export default async function SymbolPage({
     companyFinancials,
     portfolio,
   ] = await Promise.all([
-    getConstituent(symbol),
+    // ALLSHR covers every eligible stock, so the view has a weight when it can.
+    getConstituent(symbol, "ALLSHR"),
     getPriceHistory(symbol),
     latestQuoteDate(),
     db
@@ -86,6 +88,10 @@ export default async function SymbolPage({
   ]);
 
   const holding = portfolio.holdings.find((h) => h.symbol === symbol);
+  const memberOf = sortIndexCodes(
+    (meta.indexes ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+  );
+  const shariah = memberOf.some((c) => SHARIAH_INDEX_CODES.includes(c));
 
   return (
     <div className="flex flex-col gap-5">
@@ -95,10 +101,10 @@ export default async function SymbolPage({
           <>
             {meta.name ?? "—"} ·{" "}
             {sectorLabel(meta.sectorName, meta.sectorCode)}
-            {!meta.isKmi30 && (
+            {shariah && (
               <>
                 {" "}
-                <Badge tone="critical">Not in KMI30</Badge>
+                <Badge tone="good">Shariah-compliant</Badge>
               </>
             )}
           </>
@@ -115,11 +121,18 @@ export default async function SymbolPage({
         }
       />
 
-      {!meta.isKmi30 && (
-        <div className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-sm dark:border-rose-800 dark:bg-rose-950/40">
-          {symbol} is not currently a KMI30 constituent, so it is outside this
-          index&apos;s Shariah screen. Fundamentals below may be stale — the
-          ingest only refreshes current constituents.
+      {memberOf.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1 text-sm">
+          <span className="mr-1 text-xs text-slate-500 dark:text-slate-400">In indices</span>
+          {memberOf.map((code) => (
+            <Link
+              key={code}
+              href={`/?index=${code}`}
+              className="rounded-md border border-slate-200 px-2 py-0.5 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+            >
+              {code}
+            </Link>
+          ))}
         </div>
       )}
 

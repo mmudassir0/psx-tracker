@@ -32,6 +32,7 @@ export function pct(
 export function compactPkr(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
   const abs = Math.abs(value);
+  if (abs >= 1e12) return `${(value / 1e12).toFixed(2)}tn`;
   if (abs >= 1e9) return `${(value / 1e9).toFixed(2)}bn`;
   if (abs >= 1e6) return `${(value / 1e6).toFixed(2)}mn`;
   if (abs >= 1e3) return `${(value / 1e3).toFixed(1)}k`;
