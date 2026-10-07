@@ -22,12 +22,14 @@ It reports market data and your own numbers. It does not give investment advice.
 | **Screens** | 14 saved screens run on every ingest across the whole market, with a daily diff of what newly entered each one |
 | **Movers & breadth** | Market-wide gainers, losers, most traded (30-day average value), plus advance/decline breadth |
 | **Screener** | Pick any index (ALLSHR for the whole market), then sort/filter on P/E, YTD, 1Y, weight, market cap, 30-day average volume, distance off 52-week high |
-| **Symbol** | Price history since 2021, key stats, dividend yield, past payouts with book-closure dates, 4 years of financials and ratios, announcement feed, your position |
-| **Portfolio** | Several named portfolios per account (or all combined), holdings with weighted-average cost, unrealised/realised P&L, dividend income, **your weight vs index weight**, value over time against the same money in your **comparison index** (KSE100 by default; pick KSE30, ALLSHR, KMI30 or KMIALLSHR), a dividend recorder, and CSV import from your broker |
+| **Search** | Box in the top bar (press `/`): any of ~750 listed stocks by symbol or company name |
+| **Compare** | Up to 4 stocks on one % chart, with P/E, yield, returns, growth and margins side by side (best in bold) |
+| **Symbol** | Price history since 2021 with 50/200-day averages, RSI and a "vs index" mode, plain-language trend notes, similar companies in the sector with rankings, key stats, dividend yield, past payouts with book-closure dates, 4 years of financials and ratios, announcement feed, your position |
+| **Portfolio** | Several named portfolios per account (or all combined), holdings with weighted-average cost, unrealised/realised P&L, dividend income, **annual return (XIRR)** that accounts for when money went in and out, **your weight vs index weight**, value over time against the same money in your **comparison index** (KSE100 by default; pick KSE30, ALLSHR, KMI30 or KMIALLSHR), a dividend recorder, and CSV import from your broker |
 | **Strategy** | Backtest an index basket against the index itself, and get the exact trades to move your portfolio onto those weights |
 | **Risk** | Correlation matrix, beta vs index, and concentration — whether your positions are actually diversified |
 | **Liquidity** | 30-day average traded value per name, and how many sessions a position would take to exit |
-| **Sectors** | Sector rollups and a page per sector |
+| **Sectors** | Sector rollups and a page per sector, each with a rings map of its companies |
 | **Watchlist** | Follow names you don't own, with drift since you added them |
 | **CGT** | Realised gains by Pakistani tax year, FIFO and weighted average side by side, CSV export |
 | **Zakat** | Zakat on your holdings, with every scholarly judgement call left as a parameter you set |
@@ -304,6 +306,7 @@ after an hour is shown as interrupted.
 | `npm run ingest -- --recheck-pages` | Retry symbols marked as having no company page |
 | `npm run verify` | Smoke-test the PSX parsers against live pages |
 | `npm test` | Portfolio math, recomposition, backtest, zakat, parsers, account isolation, CSV import, history, backup encryption, links |
+| `npm run test:ci` | The same without the live PSX link check; GitHub runs this, plus `npm run typecheck` and lint, on every push (`.github/workflows/ci.yml`) |
 | `npm run migrate` | Bring an existing database up to the current schema |
 | `npm run make-admin -- <email>` | Make an account the admin and give it pre-account data |
 | `npm run seed:demo -- <email>` | Add demo transactions to an account (`seed:clear` removes them) |

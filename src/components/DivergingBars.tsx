@@ -23,10 +23,9 @@ export interface DivergingDatum {
  * Change-vs-zero is an above/below-baseline job, so this is a diverging bar
  * centred on zero — not a saturated heatmap grid.
  *
- * The diverging pair is blue (up) / red (down) with a neutral midpoint rather
- * than the conventional green/red, which is the classic red-green CVD trap.
- * Every bar is direct-labelled with its value, so colour is never the only
- * encoding and the tooltip only enriches.
+ * The diverging pair is green (up) / red (down), the market convention.
+ * Every bar is direct-labelled with its value and bars grow away from zero in
+ * the direction of their sign, so colour is never the only encoding.
  */
 export function DivergingBars({
   data,

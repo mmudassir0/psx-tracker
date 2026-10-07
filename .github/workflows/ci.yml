@@ -1,0 +1,35 @@
+name: Checks
+
+# Typecheck, lint and tests on every push and pull request, so a broken change
+# shows a red ✗ on GitHub before (or as) Vercel deploys it. Tests use scratch
+# SQLite files only: no secrets, no production database, no PSX requests.
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npx eslint src
+
+      - name: Tests
+        run: npm run test:ci

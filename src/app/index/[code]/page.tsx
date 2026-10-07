@@ -17,6 +17,7 @@ import { getIndexMeta } from "@/lib/psx/indices";
 import { DivergingBars, WeightBars } from "@/components/DivergingBars";
 import { PriceChart } from "@/components/PriceChart";
 import { ScreenerTable } from "@/components/ScreenerTable";
+import { toScreenerRow } from "@/lib/screener-row";
 import {
   Card,
   StatTile,
@@ -246,7 +247,7 @@ export default async function IndexPage({
         title="Constituents"
         subtitle={`${constituents.length} companies as of ${prettyDate(snapshotDate)}. Weights are uncapped free-float market cap.`}
       >
-        <ScreenerTable rows={constituents} />
+        <ScreenerTable rows={constituents.map(toScreenerRow)} />
       </Card>
 
       <Link

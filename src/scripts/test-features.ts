@@ -19,6 +19,9 @@ import { computeIndexMovers } from "@/lib/index-movers";
 import { checkStaleness, periodReturns, streakOf } from "@/lib/dashboard-data";
 import { DASHBOARD_CARDS, cardOrder, hiddenCards } from "@/lib/dashboard-layout";
 import { afterCloseOf, missingSession } from "@/lib/ingest-guard";
+import { ledgerCashFlows, xirr } from "@/lib/xirr";
+import { rankSymbols } from "@/lib/symbol-search";
+import { rsi, sma, trendNotes } from "@/lib/indicators";
 
 let failures = 0;
 function check(label: string, actual: unknown, expected: unknown) {
@@ -132,6 +135,51 @@ console.log("\n[6] Dashboard helpers");
   check("one missed day is tolerated", checkStaleness("2026-10-05", { status: "ok" }, now), null);
   check("one missed day after a failed run is reported", checkStaleness("2026-10-05", { status: "error" }, now)?.missedSessions, 1);
   check("two missed days are reported", checkStaleness("2026-10-02", { status: "ok" }, now)?.missedSessions, 2);
+
+  check("sma", sma([1, 2, 3, 4, 5], 3), [null, null, 2, 3, 4]);
+  const up = rsi(Array.from({ length: 20 }, (_, i) => 100 + i), 14);
+  check("rsi waits for 14 changes", up.slice(0, 14).every((v) => v == null), true);
+  check("rsi of a steady rise is 100", up[19], 100);
+  const zigzag = rsi(Array.from({ length: 30 }, (_, i) => (i % 2 ? 101 : 100)), 14);
+  check("rsi of equal ups and downs is near 50", Math.abs((zigzag[29] ?? 0) - 50) < 5, true);
+  check("trend notes", trendNotes(110, 105, 100, 75).map((n) => n.tone), ["up", "up", "down"]);
+
+  const syms = [
+    { s: "MEBL", n: "Meezan Bank Limited", sec: "COMMERCIAL BANKS" },
+    { s: "MEHT", n: "Mehran Sugar Mills", sec: "SUGAR" },
+    { s: "BAFL", n: "Bank Alfalah Limited", sec: "COMMERCIAL BANKS" },
+    { s: "ME", n: "Some Other Co", sec: null },
+  ];
+  check("exact symbol first", rankSymbols(syms, "me")[0].s, "ME");
+  check("symbol prefix before name", rankSymbols(syms, "meb").map((r) => r.s), ["MEBL"]);
+  check("company name words", rankSymbols(syms, "alfalah").map((r) => r.s), ["BAFL"]);
+  check("name prefix", rankSymbols(syms, "meezan").map((r) => r.s), ["MEBL"]);
+  check("blank query", rankSymbols(syms, "  "), []);
+
+  // XIRR: 1000 in, 1100 back exactly a year later is 10% a year.
+  const r1 = xirr([{ date: "2025-01-01", amount: -1000 }, { date: "2026-01-01", amount: 1100 }]);
+  check("simple one-year return", r1 == null ? null : Math.round(r1 * 100) / 100, 10);
+  // Second 1000 added halfway: the money-weighted rate is lower than 10%
+  // when the gain came before the second deposit.
+  const r2 = xirr([
+    { date: "2025-01-01", amount: -1000 },
+    { date: "2025-07-02", amount: -1000 },
+    { date: "2026-01-01", amount: 2100 },
+  ]);
+  check("timing matters", r2 != null && r2 > 6 && r2 < 7, true);
+  check("losses are negative", (xirr([{ date: "2025-01-01", amount: -1000 }, { date: "2026-01-01", amount: 800 }]) ?? 0) < 0, true);
+  check("no money back: no rate", xirr([{ date: "2025-01-01", amount: -1000 }]), null);
+  check("ledger flows", ledgerCashFlows([
+    { date: "2025-01-01", type: "buy", quantity: 10, price: 100, fees: 5 },
+    { date: "2025-03-01", type: "bonus", quantity: 1, price: 0, fees: 0 },
+    { date: "2025-06-01", type: "dividend", quantity: 11, price: 2, fees: 2 },
+    { date: "2025-09-01", type: "sell", quantity: 5, price: 120, fees: 3 },
+  ], 700, "2026-01-01"), [
+    { date: "2025-01-01", amount: -1005 },
+    { date: "2025-06-01", amount: 20 },
+    { date: "2025-09-01", amount: 597 },
+    { date: "2026-01-01", amount: 700 },
+  ]);
 
   // Daily update guards. PKT = UTC+5. 2026-10-05 is a Monday.
   check("after close is 15:45 PKT", afterCloseOf("2026-10-05").toISOString(), "2026-10-05T10:45:00.000Z");

@@ -78,6 +78,7 @@ export function MarketSunburst({
   sizeLabel = "Weight in the index",
   changeLabel = "Change",
   fullColourPct = 4,
+  initialFocus = null,
 }: {
   data: HeatmapDatum[];
   centreLabel: string;
@@ -86,10 +87,12 @@ export function MarketSunburst({
   sizeLabel?: string;
   changeLabel?: string;
   fullColourPct?: number;
+  /** Open already zoomed into this sector. */
+  initialFocus?: string | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
-  const [focus, setFocus] = useState<string | null>(null);
+  const [focus, setFocus] = useState<string | null>(initialFocus);
   // A tapped stock stays open (its card has a link); hover only previews.
   const [pinned, setPinned] = useState<HeatmapDatum | null>(null);
   const [hover, setHover] = useState<HeatmapDatum | null>(null);
@@ -164,7 +167,7 @@ export function MarketSunburst({
 
   // The parent remounts this (key) for a new index or period, so the
   // zoomed-out layout is only computed once here.
-  const [frame, setFrame] = useState<Map<string, Arc>>(() => target(null));
+  const [frame, setFrame] = useState<Map<string, Arc>>(() => target(initialFocus));
 
   const zoomTo = (next: string | null) => {
     setPinned(null);

@@ -18,6 +18,8 @@
     "backup": "tsx src/scripts/backup.ts",
     "backup:decrypt": "tsx src/scripts/backup-decrypt.ts",
     "test": "npm run test:portfolio && npm run test:recomposition && npm run test:strategy && npm run test:financials && npm run test:accounts && npm run test:features && npm run test:links",
+    "test:ci": "npm run test:portfolio && npm run test:recomposition && npm run test:strategy && npm run test:financials && npm run test:accounts && npm run test:features",
+    "typecheck": "tsc --noEmit -p .",
     "test:links": "tsx src/scripts/run-test.ts links",
     "test:portfolio": "tsx src/scripts/run-test.ts portfolio .scratch/test-portfolio.db",
     "test:recomposition": "tsx src/scripts/run-test.ts recomposition .scratch/test-recomposition.db",

@@ -8,14 +8,17 @@ import { getPayouts } from "@/lib/dividends";
 import { getCompanyFinancials } from "@/lib/financials";
 import { FinancialsTable } from "@/components/FinancialsTable";
 import {
+  getAllSymbolViews,
   getConstituent,
+  getIndexHistory,
   getPriceHistory,
   getSymbolMeta,
   latestQuoteDate,
 } from "@/lib/market";
 import { getPortfolio } from "@/lib/portfolio";
 import { SHARIAH_INDEX_CODES, sortIndexCodes } from "@/lib/psx/indices";
-import { PriceChart } from "@/components/PriceChart";
+import { StockChart } from "@/components/StockChart";
+import { getBenchmarkIndex } from "@/lib/benchmark";
 import {
   Card,
   StatTile,
@@ -37,6 +40,9 @@ import {
 } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
+
+/** Peers shown on a stock page; the stock itself is added if it ranks lower. */
+const MAX_PEERS = 10;
 
 const CATEGORY_TONE: Record<
   string,
@@ -86,6 +92,32 @@ export default async function SymbolPage({
     getCompanyFinancials(symbol),
     getPortfolio(await getCurrentUserId()),
   ]);
+
+  const benchmarkCode = await getBenchmarkIndex(await getCurrentUserId());
+  const [benchmarkHistory, allViews] = await Promise.all([
+    getIndexHistory(benchmarkCode),
+    getAllSymbolViews(),
+  ]);
+
+  // Same-sector companies, largest first, for the peers table.
+  const peers = meta.sectorCode
+    ? allViews
+        .filter((v) => v.sectorCode === meta.sectorCode && (v.marketCap ?? 0) > 0)
+        .sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0))
+    : [];
+  const peerIndex = peers.findIndex((p) => p.symbol === symbol);
+  const peerRows = peers.slice(0, MAX_PEERS);
+  if (peerIndex >= MAX_PEERS) peerRows.push(peers[peerIndex]);
+  const self = peerIndex >= 0 ? peers[peerIndex] : null;
+  const cheaperThan =
+    self?.peTtm != null && self.peTtm > 0
+      ? peers.filter((p) => p.symbol !== symbol && p.peTtm != null && p.peTtm > 0 && p.peTtm > self.peTtm!).length
+      : null;
+  const withPe = peers.filter((p) => p.symbol !== symbol && p.peTtm != null && p.peTtm > 0).length;
+  const higherYieldThan =
+    self?.dividendYieldPct != null
+      ? peers.filter((p) => p.symbol !== symbol && (p.dividendYieldPct ?? 0) < self.dividendYieldPct!).length
+      : null;
 
   const holding = portfolio.holdings.find((h) => h.symbol === symbol);
   const memberOf = sortIndexCodes(
@@ -205,9 +237,77 @@ export default async function SymbolPage({
         </Card>
       )}
 
-      <Card title="Price history" subtitle={`Daily closes for ${symbol}`}>
-        <PriceChart data={history} label={symbol} height={320} />
+      <Card title="Price history" subtitle={`Daily closes for ${symbol}, with moving averages, RSI and a comparison with ${benchmarkCode}`}>
+        <StockChart
+          data={history.map((h) => ({ date: h.date, close: h.close }))}
+          label={symbol}
+          benchmark={{
+            label: benchmarkCode,
+            data: benchmarkHistory.map((h) => ({ date: h.date, close: h.current })),
+          }}
+        />
       </Card>
+
+      {peers.length > 1 && (
+        <Card
+          title={`Similar companies · ${sectorLabel(meta.sectorName, meta.sectorCode)}`}
+          subtitle={[
+            peerIndex >= 0 ? `${symbol} is #${peerIndex + 1} of ${peers.length} by market cap` : null,
+            cheaperThan != null && withPe > 0 ? `its P/E is lower than ${cheaperThan} of ${withPe} peers` : null,
+            higherYieldThan != null ? `its dividend yield beats ${higherYieldThan} of ${peers.length - 1}` : null,
+          ].filter(Boolean).join("; ") + "."}
+          actions={
+            <Link
+              href={`/compare?s=${[symbol, ...peers.filter((p) => p.symbol !== symbol).slice(0, 3).map((p) => p.symbol)].join(",")}`}
+              className="whitespace-nowrap text-xs font-medium underline underline-offset-2"
+            >
+              Compare →
+            </Link>
+          }
+        >
+          <TableWrap>
+            <table className="w-full text-xs sm:text-sm">
+              <thead>
+                <tr>
+                  <Th>Company</Th>
+                  <Th align="right">Close</Th>
+                  <Th align="right">Day</Th>
+                  <Th align="right">1Y</Th>
+                  <Th align="right">P/E</Th>
+                  <Th align="right" className="hidden sm:table-cell">Div yield</Th>
+                  <Th align="right" className="hidden md:table-cell">Net margin</Th>
+                  <Th align="right" className="hidden sm:table-cell">Mkt cap</Th>
+                </tr>
+              </thead>
+              <tbody className="tabular">
+                {peerRows.map((p) => (
+                  <tr
+                    key={p.symbol}
+                    className={p.symbol === symbol ? "bg-amber-50/70 font-medium dark:bg-amber-950/30" : "hover:bg-slate-50 dark:hover:bg-slate-800/50"}
+                  >
+                    <Td>
+                      {p.symbol === symbol ? <span>{p.symbol}</span> : <Link href={`/symbol/${p.symbol}`} className="underline-offset-2 hover:underline">{p.symbol}</Link>}
+                      <span className="block max-w-[150px] truncate text-[11px] font-normal text-slate-500 dark:text-slate-400">{p.name ?? ""}</span>
+                    </Td>
+                    <Td align="right">{money(p.close)}</Td>
+                    <Td align="right" className={toneClass(p.changePct)}>{pct(p.changePct)}</Td>
+                    <Td align="right" className={toneClass(p.year1ChangePct)}>{pct(p.year1ChangePct, 1)}</Td>
+                    <Td align="right">{p.peTtm != null ? p.peTtm.toFixed(1) : "—"}</Td>
+                    <Td align="right" className="hidden sm:table-cell">{pct(p.dividendYieldPct, 1, false)}</Td>
+                    <Td align="right" className="hidden md:table-cell">{pct(p.netMarginPct, 1, false)}</Td>
+                    <Td align="right" className="hidden sm:table-cell">{compactPkr(p.marketCap)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableWrap>
+          {peers.length > peerRows.length && (
+            <Link href={`/sector/${meta.sectorCode}`} className="mt-2 inline-block text-xs underline">
+              All {peers.length} in the sector →
+            </Link>
+          )}
+        </Card>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title="Key statistics">

@@ -50,6 +50,11 @@ const GROUPS: NavGroup[] = [
         hint: "Saved screens, run daily",
       },
       {
+        href: "/compare",
+        label: "Compare",
+        hint: "Up to 4 stocks side by side",
+      },
+      {
         href: "/movers",
         label: "Movers & breadth",
         hint: "Gainers, losers, most active",

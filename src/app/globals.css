@@ -21,20 +21,21 @@
   /* Categorical slots — fixed order, assigned by entity, never cycled. */
   --series-1: #2a78d6;
   --series-2: #eb6834;
+  --series-3: #7c3aed;
+  --series-4: #0e7490;
 
-  /* Diverging pair for day change: cool = up, warm = down, gray midpoint.
-     Deliberately not green/red — that pair is the classic red-green CVD trap. */
-  --diverge-pos-strong: #184f95;
-  --diverge-pos-mid: #2a78d6;
-  --diverge-pos-weak: #9ec5f4;
+  /* Diverging pair for change: green = up, red = down, gray midpoint — the
+     convention PSX portals use. Every chart also labels values in text or a
+     tooltip, so colour is never the only cue. */
+  --diverge-pos-strong: #0f5c2c;
+  --diverge-pos-mid: #15803d;
+  --diverge-pos-weak: #a7d9b5;
   --diverge-neutral: #f0efec;
   --diverge-neg-weak: #f4b8b8;
   --diverge-neg-mid: #d03b3b;
   --diverge-neg-strong: #8f2020;
 
-  /* Heatmaps only: green up / red down, the convention market portals use.
-     Every box and slice also carries its % change as text, so colour is
-     never the only cue. */
+  /* Heatmap fills (blended towards a neutral, so a separate pair). */
   --heat-pos: #15803d;
   --heat-neg: #c62828;
   --heat-neutral: #e7e5e0;
@@ -51,10 +52,12 @@
 
     --series-1: #3987e5;
     --series-2: #d95926;
+    --series-3: #a78bfa;
+    --series-4: #22b8cf;
 
-    --diverge-pos-strong: #86b6ef;
-    --diverge-pos-mid: #3987e5;
-    --diverge-pos-weak: #1c5cab;
+    --diverge-pos-strong: #86d6a0;
+    --diverge-pos-mid: #22a052;
+    --diverge-pos-weak: #1d6b3a;
     --diverge-neutral: #383835;
     --diverge-neg-weak: #7a2626;
     --diverge-neg-mid: #d03b3b;

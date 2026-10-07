@@ -3,7 +3,9 @@ import { requireUser } from "@/lib/auth";
 import { getPortfolio, listTransactions } from "@/lib/portfolio";
 import { ensureDefaultPortfolio, listPortfolios } from "@/lib/portfolios";
 import { getPortfolioHistory } from "@/lib/portfolio-history";
-import { getConstituents, getTrackedIndexCodes, isDatabaseEmpty } from "@/lib/market";
+import { getConstituents, getTrackedIndexCodes, isDatabaseEmpty, latestQuoteDate } from "@/lib/market";
+import { ledgerCashFlows, xirr } from "@/lib/xirr";
+import { weekdaysBetween } from "@/lib/dates";
 import { getBenchmarkIndex } from "@/lib/benchmark";
 import { BENCHMARK_CHOICES, SHARIAH_INDEX_CODES } from "@/lib/psx/indices";
 import { BenchmarkPicker } from "@/components/BenchmarkPicker";
@@ -70,6 +72,14 @@ export default async function PortfolioPage({
     getPortfolioHistory(user.id, scope, benchmark),
   ]);
   const openPositions = portfolio.holdings.filter((h) => h.quantity > 0);
+
+  // Yearly return that accounts for when money went in and out. Under three
+  // months of history it swings wildly once annualised, so it waits.
+  const quoteDate = await latestQuoteDate();
+  const firstTrade = ledger.reduce<string | null>((min, t) => (min == null || t.date < min ? t.date : min), null);
+  const historyLongEnough = firstTrade != null && quoteDate != null && weekdaysBetween(firstTrade, quoteDate) >= 63;
+  const annualReturn =
+    historyLongEnough && quoteDate ? xirr(ledgerCashFlows(ledger, portfolio.marketValue, quoteDate)) : null;
   const heldSymbols = [
     ...new Set([...openPositions.map((h) => h.symbol), ...ledger.map((t) => t.symbol)]),
   ];
@@ -130,7 +140,7 @@ export default async function PortfolioPage({
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
         <StatTile
           label="Market value"
           value={compactPkr(portfolio.marketValue)}
@@ -168,6 +178,21 @@ export default async function PortfolioPage({
             </span>
           }
           hint="Net of tax withheld"
+        />
+        <StatTile
+          label="Annual return"
+          value={
+            <span className={toneClass(annualReturn)}>
+              {annualReturn == null ? "—" : pct(annualReturn, 1)}
+            </span>
+          }
+          hint={
+            annualReturn != null
+              ? "Per year (XIRR): counts when you bought, sold and got dividends"
+              : historyLongEnough
+                ? "Not enough buys and sales to work out"
+                : "Shown after 3 months of history"
+          }
         />
       </div>
 

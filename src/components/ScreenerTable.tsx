@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { ConstituentView } from "@/lib/market";
+import type { ScreenerRow } from "@/lib/screener-row";
 import { SymbolLink, TableWrap, Th, Td } from "@/components/ui";
 import {
   money,
@@ -43,16 +43,19 @@ const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
   { key: "drawdownFrom52wPct", label: "Off 52w hi", align: "right" },
 ];
 
+const PAGE_SIZE = 50;
+
 function roundOrNull(n: number | null): number | null {
   return n == null ? null : Math.round(n);
 }
 
-export function ScreenerTable({ rows }: { rows: ConstituentView[] }) {
+export function ScreenerTable({ rows }: { rows: ScreenerRow[] }) {
   const [sortKey, setSortKey] = useState<SortKey>("indexWeightPct");
   const [ascending, setAscending] = useState(false);
   const [sector, setSector] = useState("all");
   const [query, setQuery] = useState("");
   const [maxPe, setMaxPe] = useState("");
+  const [page, setPage] = useState(0);
 
   const sectors = useMemo(() => {
     const set = new Set(
@@ -97,7 +100,13 @@ export function ScreenerTable({ rows }: { rows: ConstituentView[] }) {
     });
   }, [rows, sector, query, maxPe, sortKey, ascending]);
 
+  // A filter that shrinks the list never leaves you on an empty page.
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const current = Math.min(page, pages - 1);
+  const shown = filtered.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE);
+
   function toggleSort(key: SortKey) {
+    setPage(0);
     if (key === sortKey) {
       setAscending((prev) => !prev);
     } else {
@@ -116,7 +125,10 @@ export function ScreenerTable({ rows }: { rows: ConstituentView[] }) {
           </span>
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPage(0);
+            }}
             placeholder="Symbol or company"
             className="w-48 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900"
           />
@@ -128,7 +140,10 @@ export function ScreenerTable({ rows }: { rows: ConstituentView[] }) {
           </span>
           <select
             value={sector}
-            onChange={(e) => setSector(e.target.value)}
+            onChange={(e) => {
+              setSector(e.target.value);
+              setPage(0);
+            }}
             className="w-52 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900"
           >
             {sectors.map((s) => (
@@ -145,7 +160,10 @@ export function ScreenerTable({ rows }: { rows: ConstituentView[] }) {
           </span>
           <input
             value={maxPe}
-            onChange={(e) => setMaxPe(e.target.value)}
+            onChange={(e) => {
+              setMaxPe(e.target.value);
+              setPage(0);
+            }}
             inputMode="decimal"
             placeholder="any"
             className="w-24 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900"
@@ -178,7 +196,7 @@ export function ScreenerTable({ rows }: { rows: ConstituentView[] }) {
             </tr>
           </thead>
           <tbody className="tabular">
-            {filtered.map((r) => (
+            {shown.map((r) => (
               <tr
                 key={r.symbol}
                 className="hover:bg-slate-50 dark:hover:bg-slate-800/50"
@@ -238,6 +256,34 @@ export function ScreenerTable({ rows }: { rows: ConstituentView[] }) {
           </tbody>
         </table>
       </TableWrap>
+      {pages > 1 && (
+        <div className="mt-3 flex items-center justify-between gap-2 text-sm">
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            {current * PAGE_SIZE + 1}–{Math.min(filtered.length, (current + 1) * PAGE_SIZE)} of {filtered.length}
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setPage(current - 1)}
+              disabled={current === 0}
+              className="rounded-md border border-slate-300 px-2.5 py-1 text-xs hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
+            >
+              ← Previous
+            </button>
+            <span className="px-2 text-xs text-slate-500 dark:text-slate-400">
+              Page {current + 1} of {pages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage(current + 1)}
+              disabled={current >= pages - 1}
+              className="rounded-md border border-slate-300 px-2.5 py-1 text-xs hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

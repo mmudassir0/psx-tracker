@@ -580,7 +580,8 @@ export default async function DashboardPage({
         }
       />
 
-      {stale && <StaleBanner stale={stale} />}
+      {/* The site header already warns when 2+ sessions are missing. */}
+      {stale && stale.missedSessions < 2 && <StaleBanner stale={stale} />}
 
       {/* One filter row above everything it scopes; one swipeable line on phones. */}
       <div className="flex items-center gap-2">

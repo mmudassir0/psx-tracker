@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getConstituents, getTrackedIndexCodes, isDatabaseEmpty } from "@/lib/market";
 import { DEFAULT_INDEX, indexLabel, sortIndexCodes } from "@/lib/psx/indices";
 import { ScreenerTable } from "@/components/ScreenerTable";
+import { toScreenerRow } from "@/lib/screener-row";
 import { Card, EmptyState, PageHeader } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -50,7 +51,7 @@ export default async function ScreenerPage({
         ))}
       </div>
       <Card>
-        <ScreenerTable rows={rows} />
+        <ScreenerTable rows={rows.map(toScreenerRow)} />
       </Card>
     </div>
   );

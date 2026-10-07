@@ -6,6 +6,7 @@ import { deleteScreenAction } from "@/app/actions";
 import { isDatabaseEmpty, latestQuoteDate } from "@/lib/market";
 import { getPortfolio } from "@/lib/portfolio";
 import { ScreenerTable } from "@/components/ScreenerTable";
+import { toScreenerRow } from "@/lib/screener-row";
 import {
   Card,
   StatTile,
@@ -145,7 +146,7 @@ export default async function ScreenDetailPage({
 
       <Card title="Matching companies" subtitle={`${matches.length} of the whole market`}>
         {matches.length > 0 ? (
-          <ScreenerTable rows={matches} />
+          <ScreenerTable rows={matches.map(toScreenerRow)} />
         ) : (
           <p className="py-6 text-center text-sm text-slate-500 dark:text-slate-400">
             Nothing currently meets these criteria.

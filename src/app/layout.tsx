@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
 import { NavLinks } from "@/components/NavLinks";
+import { SymbolSearch } from "@/components/SymbolSearch";
 import { countUnacknowledgedEvents } from "@/lib/alerts";
 import { isDatabaseEmpty, latestQuoteDate } from "@/lib/market";
 import { expectedSessionDate, weekdaysBetween } from "@/lib/dates";
@@ -65,10 +66,13 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                 Pakistan Stock Exchange
               </span>
             </Link>
-            <NavLinks
-              unreadAlerts={unreadAlerts}
-              user={user ? { name: user.name, isAdmin: user.role === "admin" } : null}
-            />
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
+              {!empty && <SymbolSearch />}
+              <NavLinks
+                unreadAlerts={unreadAlerts}
+                user={user ? { name: user.name, isAdmin: user.role === "admin" } : null}
+              />
+            </div>
           </header>
 
           {lastSession && missedSessions >= 2 && (
