@@ -830,6 +830,14 @@ export async function setBenchmarkAction(formData: FormData) {
   redirect(back);
 }
 
+/** Boxes or rings for the dashboard heatmap. Saved per account. */
+export async function saveHeatmapViewAction(view: string) {
+  const userId = await userIdOrThrow();
+  if (view !== "boxes" && view !== "rings") return;
+  const current = await getUserSetting<DashboardPrefs>(userId, "dashboard", { index: "" });
+  await setUserSetting(userId, "dashboard", { ...current, heatmapView: view });
+}
+
 /** Which dashboard cards show, and in what order. Saved per account. */
 export async function saveDashboardCardsAction(input: { order: string[]; hidden: string[] }) {
   const userId = await userIdOrThrow();

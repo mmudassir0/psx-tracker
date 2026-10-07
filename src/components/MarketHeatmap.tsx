@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { money, pct } from "@/lib/format";
+import { heatFill, heatIsStrong } from "@/lib/heat-colour";
 
 export interface HeatmapDatum {
   symbol: string;
@@ -77,16 +78,10 @@ function squarify<T extends { value: number }>(items: T[], box: Rect): (T & Rect
   return out;
 }
 
-function fill(changePct: number | null, fullAt: number): string {
-  if (changePct == null || changePct === 0) return "var(--diverge-neutral)";
-  const strength = Math.min(1, Math.abs(changePct) / fullAt);
-  const colour = changePct > 0 ? "var(--diverge-pos-mid)" : "var(--diverge-neg-mid)";
-  return `color-mix(in srgb, ${colour} ${Math.round(25 + strength * 75)}%, var(--diverge-neutral))`;
-}
 
 /**
  * Every member as a box sized by its index weight and coloured by today's
- * change, grouped by sector. Blue up / red down, matching the other charts.
+ * change, grouped by sector. Green up / red down, like market portals.
  */
 export function MarketHeatmap({
   data,
@@ -172,7 +167,7 @@ export function MarketHeatmap({
         {layout.boxes.map((b) => {
           const showLabel = b.w > 38 && b.h > 22;
           const showPct = b.w > 46 && b.h > 36;
-          const strong = b.changePct != null && Math.abs(b.changePct) >= fullColourPct / 2;
+          const strong = heatIsStrong(b.changePct, fullColourPct);
           return (
             <Link
               key={b.symbol}
@@ -185,7 +180,7 @@ export function MarketHeatmap({
               className={`absolute flex flex-col items-center justify-center overflow-hidden border border-white text-center leading-tight dark:border-slate-900 ${
                 strong ? "text-white" : "text-slate-900 dark:text-slate-100"
               } ${b.held ? "outline-2 -outline-offset-2 outline-amber-400" : ""}`}
-              style={{ left: b.x, top: b.y, width: b.w, height: b.h, background: fill(b.changePct, fullColourPct) }}
+              style={{ left: b.x, top: b.y, width: b.w, height: b.h, background: heatFill(b.changePct, fullColourPct) }}
             >
               {showLabel && (
                 <span className="max-w-full truncate px-0.5 text-[11px] font-semibold">
@@ -221,7 +216,7 @@ export function MarketHeatmap({
         <span className="flex items-center gap-1">
           <span>−{fullColourPct}%</span>
           {[-1, -0.5, -0.125, 0, 0.125, 0.5, 1].map((v) => (
-            <span key={v} className="inline-block h-2.5 w-4 rounded-[2px]" style={{ background: fill(v * fullColourPct, fullColourPct) }} />
+            <span key={v} className="inline-block h-2.5 w-4 rounded-[2px]" style={{ background: heatFill(v * fullColourPct, fullColourPct) }} />
           ))}
           <span>+{fullColourPct}%</span>
         </span>

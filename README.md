@@ -15,8 +15,8 @@ It reports market data and your own numbers. It does not give investment advice.
 
 | Page | What you get |
 |---|---|
-| **Dashboard** | Any tracked index (save your default): level and 1W–1Y returns, market heatmap, what moved the index in points, sectors today, whole-market gainers/losers, 52-week extremes and streaks, rising vs falling stocks over time, constituents with 30-session sparklines. Logged in: Your day, watchlist at a glance, portfolio vs your comparison index, holdings marked, and "Choose cards" to hide or reorder cards. A banner warns when prices are out of date |
-| **Heatmap** | Every company with a market cap (about 460) as a box sized by market cap, grouped by sector, coloured by the change over today, 1W, 1M, YTD or 1Y. Narrow it to any index; sector rollup and leaders/laggards among the 100 largest |
+| **Dashboard** | Any tracked index (save your default): level and 1W–1Y returns, market heatmap (boxes or rings, your choice is saved), what moved the index in points, sectors today, whole-market gainers/losers, 52-week extremes and streaks, rising vs falling stocks over time, constituents with 30-session sparklines. Logged in: Your day, watchlist at a glance, portfolio vs your comparison index, holdings marked, and "Choose cards" to hide or reorder cards. A banner warns when prices are out of date |
+| **Heatmap** | Every company with a market cap (about 460) as a box sized by market cap, grouped by sector, coloured by the change over today, 1W, 1M, YTD or 1Y. Narrow it to any index; sector rollup and leaders/laggards among the 100 largest. **Rings** view: index in the centre, sectors around it, stocks outside; tap a sector to zoom into its stocks. Green up / red down |
 | **Indices** | All 17 PSX indices with level, change and member count |
 | **Index** | Any index's level chart, constituents, weights, sector mix, day-change bars and membership changes |
 | **Screens** | 14 saved screens run on every ingest across the whole market, with a daily diff of what newly entered each one |

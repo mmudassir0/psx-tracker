@@ -21,6 +21,8 @@ export interface DashboardPrefs {
   index: string;
   order?: string[];
   hidden?: string[];
+  /** How the dashboard heatmap is drawn. */
+  heatmapView?: "boxes" | "rings";
 }
 
 const KNOWN = new Set<string>(DASHBOARD_CARDS.map((c) => c.id));

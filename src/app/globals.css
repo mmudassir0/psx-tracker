@@ -31,6 +31,13 @@
   --diverge-neg-weak: #f4b8b8;
   --diverge-neg-mid: #d03b3b;
   --diverge-neg-strong: #8f2020;
+
+  /* Heatmaps only: green up / red down, the convention market portals use.
+     Every box and slice also carries its % change as text, so colour is
+     never the only cue. */
+  --heat-pos: #15803d;
+  --heat-neg: #c62828;
+  --heat-neutral: #e7e5e0;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -52,6 +59,10 @@
     --diverge-neg-weak: #7a2626;
     --diverge-neg-mid: #d03b3b;
     --diverge-neg-strong: #ef8f8f;
+
+    --heat-pos: #22a052;
+    --heat-neg: #d84343;
+    --heat-neutral: #3a3a37;
   }
 }
 

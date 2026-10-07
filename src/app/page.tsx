@@ -45,7 +45,7 @@ import { DivergingBars } from "@/components/DivergingBars";
 import { IngestButton } from "@/components/IngestButton";
 import { PriceChart } from "@/components/PriceChart";
 import { YourDay } from "@/components/YourDay";
-import { MarketHeatmap } from "@/components/MarketHeatmap";
+import { DashboardHeatmap } from "@/components/DashboardHeatmap";
 import { Sparkline } from "@/components/Sparkline";
 import { BreadthChart } from "@/components/BreadthChart";
 import { SectorTable } from "@/components/SectorTable";
@@ -232,7 +232,7 @@ export default async function DashboardPage({
       <Card
         title="Market heatmap"
         actions={
-          <Link href="/heatmap" className="text-xs font-medium underline underline-offset-2">
+          <Link href="/heatmap" className="whitespace-nowrap text-xs font-medium underline underline-offset-2">
             Whole market →
           </Link>
         }
@@ -240,11 +240,15 @@ export default async function DashboardPage({
           (constituents.length > MAX_HEATMAP_BOXES
             ? `The ${MAX_HEATMAP_BOXES} largest of ${constituents.length} ${code} members`
             : `Every ${code} member`) +
-          ", sized by its weight and coloured by today's change. Tap a box to open the stock."
+          ", sized by its weight and coloured by today's change. Boxes, or rings of index, sectors and stocks."
         }
       >
         {constituents.some((c) => (c.indexWeightPct ?? 0) > 0) ? (
-          <MarketHeatmap
+          <DashboardHeatmap
+            indexCode={code}
+            indexChangePct={index?.changePct ?? null}
+            initialView={prefs.heatmapView === "rings" ? "rings" : "boxes"}
+            canSave={unlocked}
             data={constituents.slice(0, MAX_HEATMAP_BOXES).map((c) => ({
               symbol: c.symbol,
               name: c.name,

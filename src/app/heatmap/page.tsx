@@ -13,6 +13,7 @@ import { getClosesAsOf } from "@/lib/dashboard-data";
 import { addDays } from "@/lib/dates";
 import { indexLabel, sortIndexCodes } from "@/lib/psx/indices";
 import { MarketHeatmap } from "@/components/MarketHeatmap";
+import { MarketSunburst } from "@/components/MarketSunburst";
 import { SectorTable } from "@/components/SectorTable";
 import { Card, EmptyState, PageHeader, StatTile, SymbolLink } from "@/components/ui";
 import { compactPkr, money, pct, prettyDate, toneClass } from "@/lib/format";
@@ -37,7 +38,7 @@ export const metadata = { title: "Heatmap · PSX Tracker" };
 export default async function HeatmapPage({
   searchParams,
 }: {
-  searchParams: Promise<{ index?: string; period?: string }>;
+  searchParams: Promise<{ index?: string; period?: string; view?: string }>;
 }) {
   if (await isDatabaseEmpty()) {
     return (
@@ -52,6 +53,7 @@ export default async function HeatmapPage({
   const requested = sp.index?.toUpperCase();
   const code = requested && tracked.includes(requested) ? requested : ALL;
   const period = PERIODS.find((p) => p.key === sp.period?.toUpperCase()) ?? PERIODS[0];
+  const view = sp.view === "rings" ? "rings" : "boxes";
 
   const userId = await getCurrentUserId();
   const [views, quoteDate, members, holdings] = await Promise.all([
@@ -126,12 +128,14 @@ export default async function HeatmapPage({
   const laggards = [...largest].sort((a, b) => a.change! - b.change!).slice(0, TOP_MOVERS);
 
   const scopeLabel = code === ALL ? "the whole market" : indexLabel(code);
-  const href = (next: { index?: string; period?: string }) => {
+  const href = (next: { index?: string; period?: string; view?: string }) => {
     const params = new URLSearchParams();
     const idx = next.index ?? code;
     const per = next.period ?? period.key;
+    const vw = next.view ?? view;
     if (idx !== ALL) params.set("index", idx);
     if (per !== "1D") params.set("period", per);
+    if (vw !== "boxes") params.set("view", vw);
     const qs = params.toString();
     return qs ? `/heatmap?${qs}` : "/heatmap";
   };
@@ -160,13 +164,24 @@ export default async function HeatmapPage({
             </Link>
           ))}
         </div>
-        <div className="flex items-center gap-1 text-sm">
-          <span className="mr-1 shrink-0 text-xs text-slate-500 dark:text-slate-400">Change over</span>
-          {PERIODS.map((p) => (
-            <Link key={p.key} href={href({ period: p.key })} className={chipClass(p.key === period.key)}>
-              {p.key}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          <div className="flex items-center gap-1">
+            <span className="mr-1 shrink-0 text-xs text-slate-500 dark:text-slate-400">Change over</span>
+            {PERIODS.map((p) => (
+              <Link key={p.key} href={href({ period: p.key })} className={chipClass(p.key === period.key)}>
+                {p.key}
+              </Link>
+            ))}
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="mr-1 shrink-0 text-xs text-slate-500 dark:text-slate-400">View</span>
+            <Link href={href({ view: "boxes" })} className={chipClass(view === "boxes")}>
+              Boxes
             </Link>
-          ))}
+            <Link href={href({ view: "rings" })} className={chipClass(view === "rings")}>
+              Rings
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -176,9 +191,9 @@ export default async function HeatmapPage({
           label="Up / down"
           value={
             <span>
-              <span style={{ color: "var(--diverge-pos-mid)" }}>{up}</span>
+              <span style={{ color: "var(--heat-pos)" }}>{up}</span>
               <span className="text-slate-400"> / </span>
-              <span style={{ color: "var(--diverge-neg-mid)" }}>{down}</span>
+              <span style={{ color: "var(--heat-neg)" }}>{down}</span>
             </span>
           }
           hint={`over ${period.label.toLowerCase()}`}
@@ -199,19 +214,15 @@ export default async function HeatmapPage({
         title={`Heatmap · ${period.label}`}
         subtitle={
           held.size > 0
-            ? "Tap a box to open the stock. Gold outline: you hold it."
-            : "Tap a box to open the stock."
+            ? `${view === "rings" ? "Tap a sector to zoom in." : "Tap a box to open the stock."} Gold outline: you hold it.`
+            : view === "rings" ? "Index in the centre, sectors around it, stocks on the outside. Tap a sector to zoom in." : "Tap a box to open the stock."
         }
       >
         {rows.length === 0 ? (
           <p className="py-6 text-center text-sm text-slate-500">No market-cap data for this selection yet.</p>
         ) : (
-          <MarketHeatmap
-            tall
-            sizeLabel="Market cap"
-            changeLabel={period.label}
-            fullColourPct={period.fullAt}
-            data={rows.map(({ view: v, change }) => ({
+          (() => {
+            const data = rows.map(({ view: v, change }) => ({
               symbol: v.symbol,
               name: v.name,
               sector: v.sectorName ?? "Other",
@@ -220,8 +231,27 @@ export default async function HeatmapPage({
               changePct: change,
               close: v.close,
               held: held.has(v.symbol),
-            }))}
-          />
+            }));
+            return view === "rings" ? (
+              <MarketSunburst
+                key={`${code}-${period.key}`}
+                data={data}
+                centreLabel={code === ALL ? "PSX" : code}
+                centreChangePct={capWeighted}
+                sizeLabel="Market cap"
+                changeLabel={period.label}
+                fullColourPct={period.fullAt}
+              />
+            ) : (
+              <MarketHeatmap
+                tall
+                sizeLabel="Market cap"
+                changeLabel={period.label}
+                fullColourPct={period.fullAt}
+                data={data}
+              />
+            );
+          })()
         )}
       </Card>
 
