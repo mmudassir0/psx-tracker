@@ -306,6 +306,7 @@ export const financials = sqliteTable(
       columns: [t.symbol, t.fiscalYear, t.section, t.lineItem],
     }),
     index("financials_symbol_idx").on(t.symbol),
+    index("financials_item_symbol_idx").on(t.lineItem, t.symbol),
   ],
 );
 

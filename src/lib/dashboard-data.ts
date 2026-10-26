@@ -83,15 +83,22 @@ export async function getBreadthHistory(quoteDate: string): Promise<BreadthPoint
   return perSession("breadth", quoteDate, async () => {
     const from = addDays(quoteDate, -BREADTH_DAYS);
     // LDCP when PSX gave it; otherwise the symbol's previous stored close.
+    // The window is computed over a materialized slice: written inline, the
+    // planner walks the whole (symbol, date) primary key to avoid a sort,
+    // reading every quote ever stored instead of ~4 months of them.
     const rows = (await db.all(sql`
+      with recent as materialized (
+        select symbol, date, close, ldcp
+        from quotes_daily
+        where date >= ${addDays(from, -10)}
+      )
       select date,
              sum(case when close > prev then 1 else 0 end) as up,
              sum(case when close < prev then 1 else 0 end) as down
       from (
         select date, close,
                coalesce(ldcp, lag(close) over (partition by symbol order by date)) as prev
-        from quotes_daily
-        where date >= ${addDays(from, -10)}
+        from recent
       )
       where date >= ${from} and prev is not null
       group by date

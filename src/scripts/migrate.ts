@@ -180,6 +180,10 @@ async function main() {
   )`);
   await exec(`create index if not exists "push_subscriptions_user_idx" on "push_subscriptions" ("user_id")`);
 
+  // Metric lookups filter on line_item; with only the symbol index they read
+  // every financial row of every symbol in the list.
+  await exec(`create index if not exists "financials_item_symbol_idx" on "financials" ("line_item","symbol")`);
+
   console.log("Done.");
 }
 
