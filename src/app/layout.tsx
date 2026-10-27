@@ -5,7 +5,7 @@ import "./globals.css";
 import { NavLinks } from "@/components/NavLinks";
 import { SymbolSearch } from "@/components/SymbolSearch";
 import { countUnacknowledgedEvents } from "@/lib/alerts";
-import { isDatabaseEmpty, latestQuoteDate } from "@/lib/market";
+import { getDatabaseStatus, latestQuoteDate } from "@/lib/market";
 import { expectedSessionDate, weekdaysBetween } from "@/lib/dates";
 import { prettyDate } from "@/lib/format";
 import { getCurrentUser } from "@/lib/auth";
@@ -39,7 +39,8 @@ export const viewport: Viewport = {
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   // Guarded: the layout renders before the first ingest, when no tables exist.
-  const empty = await isDatabaseEmpty();
+  const dbStatus = await getDatabaseStatus();
+  const empty = dbStatus !== "ok";
   const user = await getCurrentUser();
   const unreadAlerts = empty ? 0 : await countUnacknowledgedEvents(user?.id ?? null);
 
@@ -74,6 +75,18 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               />
             </div>
           </header>
+
+          {dbStatus === "unavailable" && (
+            <div
+              role="alert"
+              className="mt-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
+            >
+              <span className="font-medium">The database is not responding.</span>{" "}
+              Your data is still stored, but it can&apos;t be read right now (for
+              example, the database plan&apos;s monthly read limit has been
+              reached). Pages will show data again once it is reachable.
+            </div>
+          )}
 
           {lastSession && missedSessions >= 2 && (
             <div

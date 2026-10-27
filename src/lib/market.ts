@@ -548,16 +548,32 @@ export async function getSymbolMeta(symbol: string) {
   );
 }
 
-async function isDatabaseEmptyUncached(): Promise<boolean> {
+export type DatabaseStatus = "ok" | "empty" | "unavailable";
+
+/**
+ * "empty" before the first ingest (no rows, or no tables yet); "unavailable"
+ * when the database refuses the query, e.g. Turso blocking reads once the
+ * plan's monthly quota is used up. Pages treat both as "nothing to show", but
+ * the layout says which, so a blocked database isn't mistaken for a new one.
+ */
+async function getDatabaseStatusUncached(): Promise<DatabaseStatus> {
   try {
     const row = await db
       .select({ count: sql<number>`count(*)` })
       .from(symbols)
       .get();
-    return (row?.count ?? 0) === 0;
-  } catch {
-    return true;
+    return (row?.count ?? 0) === 0 ? "empty" : "ok";
+  } catch (err) {
+    for (let e: unknown = err; e instanceof Error; e = e.cause) {
+      if (/no such table/i.test(e.message)) return "empty";
+    }
+    console.error("database unavailable:", err);
+    return "unavailable";
   }
+}
+
+async function isDatabaseEmptyUncached(): Promise<boolean> {
+  return (await getDatabaseStatus()) !== "ok";
 }
 
 async function getAllSymbolViewsUncached(): Promise<ConstituentView[]> {
@@ -656,5 +672,6 @@ export const getTrackedIndexCodes = cache(getTrackedIndexCodesUncached);
 const getConstituentsCached = cache(getConstituentsUncached);
 export const getConstituents = (arg: Parameters<typeof getConstituentsUncached>[0] = DEFAULT_INDEX) =>
   getConstituentsCached(arg);
+export const getDatabaseStatus = cache(getDatabaseStatusUncached);
 export const isDatabaseEmpty = cache(isDatabaseEmptyUncached);
 export const getAllSymbolViews = cache(getAllSymbolViewsUncached);
