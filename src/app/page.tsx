@@ -12,7 +12,7 @@ import {
   getMovers,
   getSectorBreakdown,
   getTrackedIndexCodes,
-  isDatabaseEmpty,
+  getDatabaseStatus,
   latestQuoteDate,
   type ConstituentView,
 } from "@/lib/market";
@@ -105,7 +105,9 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{ index?: string }>;
 }) {
-  if (await isDatabaseEmpty()) return <FirstRun />;
+  const dbStatus = await getDatabaseStatus();
+  if (dbStatus === "unavailable") return null; // the layout explains why
+  if (dbStatus === "empty") return <FirstRun />;
   const userId = await getCurrentUserId();
 
   // ?index= wins; otherwise the user's saved default; otherwise KSE100.

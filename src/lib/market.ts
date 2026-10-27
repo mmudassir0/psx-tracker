@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { and, desc, eq, gte, sql, inArray } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, gte, sql, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
   symbols,
@@ -80,13 +80,30 @@ async function latestConstituentDateUncached(
   return row?.date ?? null;
 }
 
+/**
+ * Recursive CTE `codes(code)` listing the distinct index codes of a table
+ * whose primary key or an index starts with index_code. Each step is one
+ * index seek ("loose index scan"), so it reads ~one row per code. A plain
+ * `select distinct` or `group by index_code` reads every row instead, and
+ * these tables gain a row per index (or per member) every session.
+ */
+function indexCodesCte(table: "constituents" | "index_levels") {
+  const t = sql.raw(table);
+  return sql`codes(code) as (
+    select min(index_code) from ${t}
+    union all
+    select (select min(index_code) from ${t} where index_code > code)
+    from codes where code is not null
+  )`;
+}
+
 /** Every index we hold a membership snapshot for. */
 async function getTrackedIndexCodesUncached(): Promise<string[]> {
-  const rows = await db
-    .selectDistinct({ indexCode: constituents.indexCode })
-    .from(constituents)
-    .all();
-  return rows.map((r) => r.indexCode);
+  const rows = (await db.all(sql`
+    with recursive ${indexCodesCte("constituents")}
+    select code from codes where code is not null
+  `)) as { code: string }[];
+  return rows.map((r) => r.code);
 }
 
 interface ViewMaps {
@@ -235,17 +252,21 @@ async function fetchBulkViewMaps(
       : Promise.resolve([]),
     // Newest row per symbol only. A fundamentals run adds a row per company
     // per day, so fetching every row and keeping the first grows forever.
+    // Driven from `symbols` so each symbol's newest date is one index seek;
+    // a `group by symbol` over company_stats would read every row ever stored.
     db
-      .select()
-      .from(companyStats)
-      .where(
+      .select(getTableColumns(companyStats))
+      .from(symbols)
+      .innerJoin(
+        companyStats,
         and(
-          inArray(companyStats.symbol, symbolsList),
-          sql`(${companyStats.symbol}, ${companyStats.date}) in (
-            select symbol, max(date) from company_stats group by symbol
+          eq(companyStats.symbol, symbols.symbol),
+          sql`${companyStats.date} = (
+            select max(x.date) from company_stats x where x.symbol = ${symbols.symbol}
           )`,
         ),
       )
+      .where(inArray(symbols.symbol, symbolsList))
       .all(),
     getTrailingDividendMap(),
     getLatestMetricMap(METRIC_EPS_GROWTH, symbolsList),
@@ -466,37 +487,32 @@ export interface IndexSummary {
 }
 
 export async function getIndexSummaries(): Promise<IndexSummary[]> {
-  // Aggregate in SQL: these tables hold one row per index (or member) per
-  // day, and only the newest of each is wanted.
-  const [levelRows, snapshotRows] = await Promise.all([
-    db
-      .select({
-        code: indexLevels.indexCode,
-        current: indexLevels.current,
-        changePct: indexLevels.changePct,
-      })
-      .from(indexLevels)
-      .where(
-        sql`(${indexLevels.indexCode}, ${indexLevels.date}) in (
-          select index_code, max(date) from index_levels group by index_code
-        )`,
+  // These tables hold one row per index (or member) per day and only the
+  // newest of each is wanted: found with index seeks, see indexCodesCte.
+  const [levelRows, snapshotRows] = (await Promise.all([
+    db.all(sql`
+      with recursive ${indexCodesCte("index_levels")}
+      select l.index_code as code, l.current as current, l.change_pct as changePct
+      from codes
+      join index_levels l
+        on l.index_code = codes.code
+       and l.date = (select max(date) from index_levels where index_code = codes.code)
+    `),
+    db.all(sql`
+      with recursive ${indexCodesCte("constituents")},
+      latest(code, date) as (
+        select code, (select max(date) from constituents where index_code = code)
+        from codes where code is not null
       )
-      .all(),
-    db
-      .select({
-        code: constituents.indexCode,
-        date: constituents.date,
-        count: sql<number>`count(*)`,
-      })
-      .from(constituents)
-      .where(
-        sql`(${constituents.indexCode}, ${constituents.date}) in (
-          select index_code, max(date) from constituents group by index_code
-        )`,
-      )
-      .groupBy(constituents.indexCode, constituents.date)
-      .all(),
-  ]);
+      select code, date,
+             (select count(*) from constituents c
+               where c.index_code = latest.code and c.date = latest.date) as count
+      from latest
+    `),
+  ])) as [
+    { code: string; current: number; changePct: number | null }[],
+    { code: string; date: string; count: number }[],
+  ];
 
   const levelMap = new Map(levelRows.map((l) => [l.code, l]));
   const snapshotMap = new Map(snapshotRows.map((s) => [s.code, s]));
@@ -506,7 +522,7 @@ export async function getIndexSummaries(): Promise<IndexSummary[]> {
     code,
     level: levelMap.get(code)?.current ?? null,
     changePct: levelMap.get(code)?.changePct ?? null,
-    memberCount: snapshotMap.get(code)?.count ?? 0,
+    memberCount: Number(snapshotMap.get(code)?.count ?? 0),
     snapshotDate: snapshotMap.get(code)?.date ?? null,
   }));
 }
@@ -532,16 +548,32 @@ export async function getSymbolMeta(symbol: string) {
   );
 }
 
-async function isDatabaseEmptyUncached(): Promise<boolean> {
+export type DatabaseStatus = "ok" | "empty" | "unavailable";
+
+/**
+ * "empty" before the first ingest (no rows, or no tables yet); "unavailable"
+ * when the database refuses the query, e.g. Turso blocking reads once the
+ * plan's monthly quota is used up. Pages treat both as "nothing to show", but
+ * the layout says which, so a blocked database isn't mistaken for a new one.
+ */
+async function getDatabaseStatusUncached(): Promise<DatabaseStatus> {
   try {
     const row = await db
       .select({ count: sql<number>`count(*)` })
       .from(symbols)
       .get();
-    return (row?.count ?? 0) === 0;
-  } catch {
-    return true;
+    return (row?.count ?? 0) === 0 ? "empty" : "ok";
+  } catch (err) {
+    for (let e: unknown = err; e instanceof Error; e = e.cause) {
+      if (/no such table/i.test(e.message)) return "empty";
+    }
+    console.error("database unavailable:", err);
+    return "unavailable";
   }
+}
+
+async function isDatabaseEmptyUncached(): Promise<boolean> {
+  return (await getDatabaseStatus()) !== "ok";
 }
 
 async function getAllSymbolViewsUncached(): Promise<ConstituentView[]> {
@@ -640,5 +672,6 @@ export const getTrackedIndexCodes = cache(getTrackedIndexCodesUncached);
 const getConstituentsCached = cache(getConstituentsUncached);
 export const getConstituents = (arg: Parameters<typeof getConstituentsUncached>[0] = DEFAULT_INDEX) =>
   getConstituentsCached(arg);
+export const getDatabaseStatus = cache(getDatabaseStatusUncached);
 export const isDatabaseEmpty = cache(isDatabaseEmptyUncached);
 export const getAllSymbolViews = cache(getAllSymbolViewsUncached);
