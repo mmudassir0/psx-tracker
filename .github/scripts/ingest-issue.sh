@@ -27,7 +27,8 @@ excerpt=$(printf '%s\n' "$log" | tail -n +"${first:-1}" \
   | grep -vE '^\s+at ' | head -n 30)
 
 # The most useful single line: Turso's BLOCKED message, else the first error.
-reason=$(printf '%s\n' "$excerpt" | grep -m1 -oE 'BLOCKED: [^]]*|ingest failed: [^\n]*' || true)
+reason=$(printf '%s\n' "$excerpt" | grep -m1 -oE 'BLOCKED: [^]]*' || true)
+[ -n "$reason" ] || reason=$(printf '%s\n' "$excerpt" | grep -m1 -E 'failed' | cut -c1-200 || true)
 
 body=$(cat <<EOF
 The scheduled PSX ingest failed. **Reason:** ${reason:-see the log below}
