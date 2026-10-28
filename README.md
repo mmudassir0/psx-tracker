@@ -24,8 +24,9 @@ It reports market data and your own numbers. It does not give investment advice.
 | **Screener** | Pick any index (ALLSHR for the whole market), then sort/filter on P/E, YTD, 1Y, weight, market cap, 30-day average volume, distance off 52-week high |
 | **Search** | Box in the top bar (press `/`): any of ~750 listed stocks by symbol or company name |
 | **Compare** | Up to 4 stocks on one % chart, with P/E, yield, returns, growth and margins side by side (best in bold) |
-| **Symbol** | Price history since 2021 with 50/200-day averages, RSI and a "vs index" mode, plain-language trend notes, similar companies in the sector with rankings, key stats, dividend yield, past payouts with book-closure dates, 4 years of financials and ratios, announcement feed, your position |
-| **Portfolio** | Several named portfolios per account (or all combined), holdings with weighted-average cost, unrealised/realised P&L, dividend income, **annual return (XIRR)** that accounts for when money went in and out, **your weight vs index weight**, value over time against the same money in your **comparison index** (KSE100 by default; pick KSE30, ALLSHR, KMI30 or KMIALLSHR), a dividend recorder, and CSV import from your broker |
+| **Symbol** | Price history since 2021 with 50/200-day averages, RSI and a "vs index" mode, plain-language trend notes, similar companies in the sector with rankings, key stats, dividend yield, past payouts with book-closure dates, 4 years of financials and ratios, announcement feed, your position, **valuation history** (P/E against its own median), and an **"In plain English"** summary plus AI key points of results filings (when Grok is set up, see below) |
+| **Portfolio** | Several named portfolios per account (or all combined), holdings with weighted-average cost, unrealised/realised P&L, dividend income, **annual return (XIRR)** that accounts for when money went in and out, **your weight vs index weight**, value over time against the same money in your **comparison index** (KSE100 by default; pick KSE30, ALLSHR, KMI30 or KMIALLSHR), a dividend recorder, **expected dividends for the next 12 months**, and CSV import from your broker |
+| **Mutual funds** | Funds you hold (entered by you: MUFAP can't be read automatically), valued at the NAVs you record, with average cost, realised/unrealised P&L and dividends; included in the portfolio total |
 | **Strategy** | Backtest an index basket against the index itself, and get the exact trades to move your portfolio onto those weights |
 | **Risk** | Correlation matrix, beta vs index, and concentration — whether your positions are actually diversified |
 | **Liquidity** | 30-day average traded value per name, and how many sessions a position would take to exit |
@@ -240,6 +241,34 @@ expire are removed automatically on the next send.
 **Email** uses Resend. Alerts only go to addresses confirmed through an
 emailed link. Without a domain verified in Resend, Resend only delivers to
 your own address.
+
+## AI summaries (optional, xAI Grok)
+
+After each ingest the workflow writes short plain-English summaries: one per
+company (from its financials, ratios and recent announcements) and the key
+points of recent results PDFs. They cover KSE100 plus anything someone holds
+or watches, are rewritten only when their input changes, and are capped per
+run (cost is printed in the workflow log; a few US cents a run at grok-4.3
+prices). Nothing is generated at page-view time.
+
+To turn it on, add a repository secret on GitHub (Settings → Secrets and
+variables → Actions):
+
+| Name | Value |
+|---|---|
+| `XAI_API_KEY` | your xAI API key |
+
+Optionally set a repository *variable* `XAI_MODEL` to use another Grok model
+(default `grok-4.3`). Without the secret the step is skipped. Locally:
+`XAI_API_KEY=... npm run summarise` (or `-- --dry-run` to see what would be
+summarised).
+
+## Weekly digest
+
+Every Friday evening (`.github/workflows/digest.yml`) each user who has
+Telegram, email or push set up gets one message: the index and portfolio
+week, best and worst holdings, their announcements and dividends likely in
+the next 30 days. Users can turn it off on the Account page.
 
 ## Backups
 
