@@ -1,5 +1,6 @@
-/** Expected-dividend forecast: source priority, totals, yields and timing. */
+/** Expected-dividend forecast and P/E-history summary (pure functions). */
 import { buildForecast, type DividendEvent } from "@/lib/dividend-forecast";
+import { summariseValuation } from "@/lib/valuation";
 
 let failures = 0;
 function check(label: string, actual: unknown, expected: unknown) {
@@ -36,6 +37,17 @@ check("months start with the current one", f.byMonth.map((m) => m.month).slice(0
 check("OGDC November payment lands in November", f.byMonth.find((m) => m.month === "11")?.amount, 100);
 check("MEBL March payment lands in March", f.byMonth.find((m) => m.month === "03")?.amount, 700);
 check("by-month sums to the total", f.byMonth.reduce((s, m) => s + m.amount, 0), 950);
+
+console.log("\n[valuation]");
+const series = Array.from({ length: 25 }, (_, i) => ({ date: `2026-09-${String(i + 1).padStart(2, "0")}`, pe: 10 + i }));
+series.push({ date: "2026-09-26", pe: -3 }); // a loss-making day is ignored
+series.push({ date: "2026-09-27", pe: 12 });
+const v = summariseValuation(series);
+check("current is the latest positive P/E", v.current, 12);
+check("median of 10..34 and 12", v.median, 21.5);
+check("range", [v.low, v.high], [10, 34]);
+check("percentile: 2 of 26 days were lower", Math.round(v.percentile ?? -1), 8);
+check("too little history gives no percentile", summariseValuation(series.slice(0, 5)).percentile, null);
 
 if (failures) {
   console.log(`\n${failures} forecast check(s) failed.`);

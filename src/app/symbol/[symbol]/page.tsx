@@ -17,6 +17,8 @@ import {
 } from "@/lib/market";
 import { getPortfolio } from "@/lib/portfolio";
 import { SHARIAH_INDEX_CODES, sortIndexCodes } from "@/lib/psx/indices";
+import { ValuationChart } from "@/components/ValuationChart";
+import { getValuationHistory, MIN_VALUATION_POINTS } from "@/lib/valuation";
 import { StockChart } from "@/components/StockChart";
 import { getBenchmarkIndex } from "@/lib/benchmark";
 import {
@@ -94,9 +96,10 @@ export default async function SymbolPage({
   ]);
 
   const benchmarkCode = await getBenchmarkIndex(await getCurrentUserId());
-  const [benchmarkHistory, allViews] = await Promise.all([
+  const [benchmarkHistory, allViews, valuation] = await Promise.all([
     getIndexHistory(benchmarkCode),
     getAllSymbolViews(),
+    getValuationHistory(symbol),
   ]);
 
   // Same-sector companies, largest first, for the peers table.
@@ -247,6 +250,37 @@ export default async function SymbolPage({
           }}
         />
       </Card>
+
+      {valuation.points.length >= 2 && (
+        <Card
+          title="Valuation history"
+          subtitle="P/E on each day we captured it, against this stock's own median"
+        >
+          <p className="mb-2 text-sm">
+            P/E is <span className="tabular font-medium">{valuation.current?.toFixed(1)}</span>
+            {valuation.median != null && (
+              <>
+                {" "}against a median of{" "}
+                <span className="tabular font-medium">{valuation.median.toFixed(1)}</span>
+                {" "}(range {valuation.low?.toFixed(1)}–{valuation.high?.toFixed(1)})
+              </>
+            )}
+            .{" "}
+            {valuation.percentile != null ? (
+              <span className="text-slate-600 dark:text-slate-300">
+                It was lower on {Math.round(valuation.percentile)}% of the {valuation.points.length} days
+                recorded: {valuationWord(valuation.percentile)} by its own history.
+              </span>
+            ) : (
+              <span className="text-slate-500">
+                {valuation.points.length} days recorded so far; a cheap/expensive reading needs at least{" "}
+                {MIN_VALUATION_POINTS}.
+              </span>
+            )}
+          </p>
+          <ValuationChart data={valuation.points} median={valuation.median} />
+        </Card>
+      )}
 
       {peers.length > 1 && (
         <Card
@@ -471,4 +505,13 @@ function Stat({
       <dd className="font-medium">{value}</dd>
     </div>
   );
+}
+
+/** Plain-language reading of where today's P/E sits in its own history. */
+function valuationWord(percentile: number): string {
+  if (percentile <= 20) return "cheap";
+  if (percentile <= 40) return "on the cheap side";
+  if (percentile < 60) return "about typical";
+  if (percentile < 80) return "on the expensive side";
+  return "expensive";
 }

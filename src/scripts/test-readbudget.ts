@@ -115,6 +115,7 @@ async function main() {
   const backtest = await import("@/lib/backtest");
   const financials = await import("@/lib/financials");
   const dividends = await import("@/lib/dividends");
+  const valuation = await import("@/lib/valuation");
 
   const loaders: [string, () => Promise<unknown>][] = [
     ["database status", () => market.getDatabaseStatus()],
@@ -131,6 +132,7 @@ async function main() {
     ["recomposition", () => recomposition.getRecompositionHistory("KSE100")],
     ["company financials", () => financials.getCompanyFinancials("S001")],
     ["payouts", () => dividends.getPayouts("S001")],
+    ["valuation history", () => valuation.getValuationHistory("S001")],
     ["backtest", () => backtest.runBacktest({ indexCode: "KMI30", startDate: "2026-01-01" })],
   ];
 
