@@ -67,15 +67,18 @@ jobs:
           set -o pipefail
           npx tsx src/scripts/ingest.ts --trigger=schedule ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }} 2>&1 | tee -a ingest.log
 
-      # Plain-English summaries with xAI Grok (src/scripts/summarise.ts).
-      # Skipped without the XAI_API_KEY secret; never fails the ingest.
+      # Plain-English summaries with an LLM (src/scripts/summarise.ts): Groq
+      # when the GROQ_API_KEY secret is set (xAI with XAI_API_KEY instead).
+      # Skipped without a key; never fails the ingest.
       - name: AI summaries
         continue-on-error: true
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
-          XAI_MODEL: ${{ vars.XAI_MODEL }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_TOKEN_BUDGET: ${{ vars.LLM_TOKEN_BUDGET }}
         run: npx tsx src/scripts/summarise.ts
 
       # The in-app crash alert needs the database (it looks up who the admins
