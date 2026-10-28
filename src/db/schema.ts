@@ -502,7 +502,7 @@ export const pushSubscriptions = sqliteTable(
 );
 
 /**
- * Plain-English summaries written by an LLM (xAI Grok) during the ingest
+ * Plain-English summaries written by an LLM (Groq or xAI) during the ingest
  * workflow, never at page-view time. `sourceHash` is a hash of the input the
  * summary was written from, so it is only regenerated when that changes.
  *   id "company:MEBL"          what the financials and recent news say

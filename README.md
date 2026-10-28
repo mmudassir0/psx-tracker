@@ -242,26 +242,30 @@ expire are removed automatically on the next send.
 emailed link. Without a domain verified in Resend, Resend only delivers to
 your own address.
 
-## AI summaries (optional, xAI Grok)
+## AI summaries (optional, Groq)
 
 After each ingest the workflow writes short plain-English summaries: one per
 company (from its financials, ratios and recent announcements) and the key
 points of recent results PDFs. They cover KSE100 plus anything someone holds
-or watches, are rewritten only when their input changes, and are capped per
-run (cost is printed in the workflow log; a few US cents a run at grok-4.3
-prices). Nothing is generated at page-view time.
+or watches, are rewritten only when their input changes, and nothing is
+generated at page-view time.
 
 To turn it on, add a repository secret on GitHub (Settings → Secrets and
 variables → Actions):
 
 | Name | Value |
 |---|---|
-| `XAI_API_KEY` | your xAI API key |
+| `GROQ_API_KEY` | your Groq API key (console.groq.com) |
 
-Optionally set a repository *variable* `XAI_MODEL` to use another Grok model
-(default `grok-4.3`). Without the secret the step is skipped. Locally:
-`XAI_API_KEY=... npm run summarise` (or `-- --dry-run` to see what would be
-summarised).
+The default model is `openai/gpt-oss-120b`. Each run stays within a token
+budget sized for Groq's free tier (about 45k tokens a run, four runs a day,
+under its 200k-a-day limit) and is paced under its tokens-per-minute limit,
+so the first full pass spreads over several days; after that only changes
+are summarised. Optional repository *variables*: `LLM_MODEL` (another model)
+and `LLM_TOKEN_BUDGET` (tokens per run, e.g. higher on a paid plan). An
+`XAI_API_KEY` secret works instead of Groq (xAI Grok, `grok-4.3`).
+
+Locally: `GROQ_API_KEY=... npm run summarise` (or `-- --dry-run`).
 
 ## Weekly digest
 
