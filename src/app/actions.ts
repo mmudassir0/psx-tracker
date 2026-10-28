@@ -35,6 +35,7 @@ import {
   evaluateAlerts,
   type AlertKind,
 } from "@/lib/alerts";
+import { symbolOptional } from "@/lib/alert-types";
 import { runIngest } from "@/lib/psx/ingest";
 import { desc } from "drizzle-orm";
 import { db } from "@/db";
@@ -166,6 +167,7 @@ const alertSchema = z.object({
     "near_52w_low",
     "dropped_from_kmi30",
     "added_to_kmi30",
+    "new_announcement",
   ]),
   threshold: z
     .string()
@@ -196,20 +198,19 @@ export async function createAlertAction(
   }
 
   const { symbol, kind, threshold, note } = parsed.data;
-  const membershipRule =
-    kind === "dropped_from_kmi30" || kind === "added_to_kmi30";
+  const noThreshold = symbolOptional(kind as AlertKind);
 
-  if (!membershipRule && (threshold == null || !Number.isFinite(threshold))) {
+  if (!noThreshold && (threshold == null || !Number.isFinite(threshold))) {
     return { ok: false, message: "This alert type needs a numeric threshold" };
   }
-  if (!membershipRule && !symbol) {
+  if (!noThreshold && !symbol) {
     return { ok: false, message: "This alert type needs a symbol" };
   }
 
   await createAlert(userId, {
     symbol,
     kind: kind as AlertKind,
-    threshold: membershipRule ? null : threshold,
+    threshold: noThreshold ? null : threshold,
     note: note ?? null,
   });
 

@@ -12,12 +12,9 @@
  * they are cached per ingest instead (see src/lib/market-cache.ts).
  */
 import Database from "better-sqlite3";
-import { createRequire } from "node:module";
-import * as schema from "@/db/schema";
 import { db } from "@/db";
 import { assertScratchDatabase } from "./test-guard";
-
-const require = createRequire(import.meta.url);
+import { resetToAppSchema } from "./test-schema";
 
 /** Tables that gain rows every session; a full scan of these is a bug. */
 const GROWING_TABLES = [
@@ -51,13 +48,6 @@ proto.prepare = function (src: string) {
   }
   return stmt as unknown as Database.Statement;
 };
-
-async function createSchema() {
-  const { pushSQLiteSchema } = require("drizzle-kit/api") as typeof import("drizzle-kit/api");
-  // Only the generated DDL is used; it runs on the raw handle.
-  const { statementsToExecute } = await pushSQLiteSchema(schema, db as never);
-  for (const statement of statementsToExecute) db.$client.exec(statement);
-}
 
 function seed() {
   const c = db.$client;
@@ -116,10 +106,7 @@ function fullScans(entry: Logged): string[] {
 
 async function main() {
   console.log(`Using scratch database: ${assertScratchDatabase()}`);
-  db.$client.exec(
-    (db.$client.prepare("select group_concat('drop table if exists \"' || name || '\";', ' ') as s from sqlite_master where type='table' and name not like 'sqlite_%'").get() as { s: string | null }).s ?? "",
-  );
-  await createSchema();
+  await resetToAppSchema();
   const { quoteDate } = seed();
 
   const market = await import("@/lib/market");

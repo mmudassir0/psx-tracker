@@ -13,7 +13,8 @@ export type AlertKind =
   | "near_52w_high"
   | "near_52w_low"
   | "dropped_from_kmi30"
-  | "added_to_kmi30";
+  | "added_to_kmi30"
+  | "new_announcement";
 
 export const ALERT_LABELS: Record<AlertKind, string> = {
   price_above: "Price rises above",
@@ -24,9 +25,18 @@ export const ALERT_LABELS: Record<AlertKind, string> = {
   near_52w_low: "Within % of 52-week low",
   dropped_from_kmi30: "Dropped from KMI30 (Shariah non-compliance)",
   added_to_kmi30: "Added to KMI30",
+  new_announcement: "New announcement (results, dividends, board meetings…)",
 };
 
-/** Membership alerts have no numeric threshold. */
+/** Membership and announcement alerts have no numeric threshold. */
 export function needsThreshold(kind: AlertKind): boolean {
-  return kind !== "dropped_from_kmi30" && kind !== "added_to_kmi30";
+  return !symbolOptional(kind);
+}
+
+/**
+ * Rules that may leave the symbol blank, meaning "every stock I hold".
+ * The others need both a symbol and a threshold.
+ */
+export function symbolOptional(kind: AlertKind): boolean {
+  return kind === "dropped_from_kmi30" || kind === "added_to_kmi30" || kind === "new_announcement";
 }

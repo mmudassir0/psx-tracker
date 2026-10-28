@@ -17,8 +17,8 @@
     "telegram:setup": "tsx src/scripts/telegram-setup.ts",
     "backup": "tsx src/scripts/backup.ts",
     "backup:decrypt": "tsx src/scripts/backup-decrypt.ts",
-    "test": "npm run test:portfolio && npm run test:recomposition && npm run test:strategy && npm run test:financials && npm run test:accounts && npm run test:features && npm run test:readbudget && npm run test:links",
-    "test:ci": "npm run test:portfolio && npm run test:recomposition && npm run test:strategy && npm run test:financials && npm run test:accounts && npm run test:features && npm run test:readbudget",
+    "test": "npm run test:portfolio && npm run test:recomposition && npm run test:strategy && npm run test:financials && npm run test:accounts && npm run test:features && npm run test:readbudget && npm run test:alerts && npm run test:links",
+    "test:ci": "npm run test:portfolio && npm run test:recomposition && npm run test:strategy && npm run test:financials && npm run test:accounts && npm run test:features && npm run test:readbudget && npm run test:alerts",
     "typecheck": "next typegen && tsc --noEmit -p .",
     "test:links": "tsx src/scripts/run-test.ts links",
     "test:portfolio": "tsx src/scripts/run-test.ts portfolio .scratch/test-portfolio.db",
@@ -28,6 +28,7 @@
     "test:accounts": "tsx src/scripts/run-test.ts accounts .scratch/test-accounts.db",
     "test:features": "tsx src/scripts/run-test.ts features",
     "test:readbudget": "tsx src/scripts/run-test.ts readbudget .scratch/test-readbudget.db",
+    "test:alerts": "tsx src/scripts/run-test.ts alerts .scratch/test-alerts.db",
     "seed:demo": "tsx src/scripts/seed-demo.ts",
     "seed:clear": "tsx src/scripts/seed-demo.ts --clear"
   },
