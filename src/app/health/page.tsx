@@ -31,25 +31,13 @@ import {
 } from "@/components/ui";
 import { count as fmtCount, prettyDate, relativeTime } from "@/lib/format";
 import { IngestButton } from "@/components/IngestButton";
-
-export const dynamic = "force-dynamic";
+import { marketCached } from "@/lib/market-cache";
 
 /**
- * Data health.
- *
- * Coverage from PSX is uneven — some counters have no company page at all,
- * some have only weeks of price history — and silently incomplete data is
- * worse than visibly incomplete data. This page makes the gaps explicit.
+ * Coverage counts scan whole tables (~2.5M rows on production data), so they
+ * are computed once per ingest and shared, not on every visit.
  */
-export default async function HealthPage() {
-  if (await isDatabaseEmpty()) {
-    return (
-      <EmptyState title="No data yet">
-        Run <code>npm run setup</code> to populate the database.
-      </EmptyState>
-    );
-  }
-
+const loadCoverage = marketCached("health-coverage", async () => {
   const totals = {
     symbols: (await db.select({ c: sql<number>`count(*)` }).from(symbols).get())?.c ?? 0,
     quotes:
@@ -86,6 +74,43 @@ export default async function HealthPage() {
     .groupBy(quotesDaily.symbol)
     .all();
 
+  const missingFundamentals = await db
+    .select({ symbol: symbols.symbol })
+    .from(symbols)
+    .where(
+      sql`${symbols.noCompanyPage} = 0 and ${symbols.symbol} not in (select symbol from company_stats)`,
+    )
+    .all();
+
+  const snapshotRows = await db
+    .select({
+      code: constituents.indexCode,
+      dates: sql<number>`count(distinct ${constituents.date})`,
+    })
+    .from(constituents)
+    .groupBy(constituents.indexCode)
+    .all();
+  return { totals, noPage, depth, missingFundamentals, snapshotRows };
+});
+
+/**
+ * Data health.
+ *
+ * Coverage from PSX is uneven — some counters have no company page at all,
+ * some have only weeks of price history — and silently incomplete data is
+ * worse than visibly incomplete data. This page makes the gaps explicit.
+ */
+export default async function HealthPage() {
+  if (await isDatabaseEmpty()) {
+    return (
+      <EmptyState title="No data yet">
+        Run <code>npm run setup</code> to populate the database.
+      </EmptyState>
+    );
+  }
+
+  const { totals, noPage, depth, missingFundamentals, snapshotRows } = await loadCoverage();
+
   const buckets = [
     { label: "1000+ sessions", test: (n: number) => n > 1000 },
     { label: "250–1000", test: (n: number) => n > 250 && n <= 1000 },
@@ -107,24 +132,8 @@ export default async function HealthPage() {
     .sort((a, b) => a.last.localeCompare(b.last))
     .slice(0, 20);
 
-  const missingFundamentals = await db
-    .select({ symbol: symbols.symbol })
-    .from(symbols)
-    .where(
-      sql`${symbols.noCompanyPage} = 0 and ${symbols.symbol} not in (select symbol from company_stats)`,
-    )
-    .all();
-
   const trackedCodes = await getTrackedIndexCodes();
   const indexCodes = sortIndexCodes(trackedCodes);
-  const snapshotRows = await db
-    .select({
-      code: constituents.indexCode,
-      dates: sql<number>`count(distinct ${constituents.date})`,
-    })
-    .from(constituents)
-    .groupBy(constituents.indexCode)
-    .all();
   const datesByCode = new Map(snapshotRows.map((r) => [r.code, r.dates]));
   const snapshotCounts = indexCodes.map((code) => ({
     code,

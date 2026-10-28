@@ -390,7 +390,12 @@ export const ingestRuns = sqliteTable("ingest_runs", {
   progress: text("progress"),
   /** How the run was launched, for the history list. */
   trigger: text("trigger", { enum: ["cli", "ui", "schedule"] }),
-});
+}, (t) => [
+  // The market cache's version check (max finished_at) reads one row.
+  index("ingest_runs_finished_idx").on(t.finishedAt),
+  // "Last ingest" banner and history list, newest first.
+  index("ingest_runs_started_idx").on(t.startedAt),
+]);
 
 // ---------------------------------------------------------------------------
 // Accounts (Better Auth). Property names are the field names Better Auth

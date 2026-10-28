@@ -20,8 +20,6 @@ import {
 } from "@/components/ui";
 import { pct, prettyDate } from "@/lib/format";
 
-export const dynamic = "force-dynamic";
-
 const WINDOWS = [
   { key: "180", label: "6 months", days: 180 },
   { key: "365", label: "1 year", days: 365 },

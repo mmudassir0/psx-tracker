@@ -11,8 +11,6 @@ import {
 } from "@/components/ui";
 import { money, pct, toneClass } from "@/lib/format";
 
-export const dynamic = "force-dynamic";
-
 export default async function WatchlistPage() {
   const user = await requireUser("/watchlist");
   if (await isDatabaseEmpty()) {

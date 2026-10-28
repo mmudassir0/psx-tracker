@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { constituents } from "@/db/schema";
 import { TRACKED_INDEX } from "@/lib/psx/ingest";
+import { marketCached } from "@/lib/market-cache";
 
 export interface RecompositionEvent {
   date: string;
@@ -10,7 +11,7 @@ export interface RecompositionEvent {
   dropped: string[];
 }
 
-export async function getRecompositionHistory(
+async function getRecompositionHistoryUncached(
   indexCode = TRACKED_INDEX,
 ): Promise<RecompositionEvent[]> {
   // One query for every snapshot: two per date pair grew by two round-trips
@@ -56,7 +57,7 @@ export interface MembershipRun {
   current: boolean;
 }
 
-export async function getMembershipRuns(
+async function getMembershipRunsUncached(
   indexCode = TRACKED_INDEX,
 ): Promise<MembershipRun[]> {
   const rows = await db
@@ -104,7 +105,7 @@ export async function getMembershipRuns(
   });
 }
 
-export async function getSnapshotCoverage(indexCode = TRACKED_INDEX): Promise<{
+async function getSnapshotCoverageUncached(indexCode = TRACKED_INDEX): Promise<{
   count: number;
   first: string | null;
   last: string | null;
@@ -123,3 +124,9 @@ export async function getSnapshotCoverage(indexCode = TRACKED_INDEX): Promise<{
     last: dates[dates.length - 1] ?? null,
   };
 }
+
+// Every snapshot of an index is read to build these, and they only change
+// when an ingest adds a snapshot: shared across requests until then.
+export const getRecompositionHistory = marketCached("recomposition-history", getRecompositionHistoryUncached);
+export const getMembershipRuns = marketCached("membership-runs", getMembershipRunsUncached);
+export const getSnapshotCoverage = marketCached("snapshot-coverage", getSnapshotCoverageUncached);

@@ -3,17 +3,25 @@ import { db } from "@/db";
 import { quotesDaily, watchlist } from "@/db/schema";
 import { addDays, expectedSessionDate, startOfYear, weekdaysBetween } from "@/lib/dates";
 import type { ConstituentView } from "@/lib/market";
+import { marketCached } from "@/lib/market-cache";
 
 /**
- * Market data changes once a day, so whole-market reads are kept per server
- * instance and keyed by the newest session: a warm instance serves every
- * dashboard view from memory until the next ingest lands.
+ * Market data changes once a day. Whole-market reads go through the shared
+ * market cache (keyed by the newest finished ingest, see market-cache.ts) and
+ * are also kept per server instance, keyed by the newest session.
  */
 const memo = new Map<string, { date: string; value: unknown }>();
+
+type Encoded = { map: [unknown, unknown][] } | { plain: unknown };
+const encode = (v: unknown): Encoded => (v instanceof Map ? { map: [...v] } : { plain: v });
+const decode = (e: Encoded): unknown => ("map" in e ? new Map(e.map) : e.plain);
+
 async function perSession<T>(key: string, date: string, load: () => Promise<T>): Promise<T> {
   const hit = memo.get(key);
   if (hit && hit.date === date) return hit.value as T;
-  const value = await load();
+  // Maps don't survive the cache's JSON round trip, so carry them as entries.
+  const shared = marketCached(`dash-${key}-${date}`, async () => encode(await load()));
+  const value = decode(await shared()) as T;
   memo.set(key, { date, value });
   return value;
 }

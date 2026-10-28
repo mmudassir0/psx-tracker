@@ -39,8 +39,6 @@ import {
   sectorLabel,
 } from "@/lib/format";
 
-export const dynamic = "force-dynamic";
-
 /** Peers shown on a stock page; the stock itself is added if it ranks lower. */
 const MAX_PEERS = 10;
 
