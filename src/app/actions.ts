@@ -764,6 +764,12 @@ export async function setEmailAlertsAction(formData: FormData) {
   revalidatePath("/account");
 }
 
+export async function setWeeklyDigestAction(formData: FormData) {
+  const userId = await userIdOrThrow();
+  await updateNotifySettings(userId, { weeklyDigest: formData.get("enabled") === "true" });
+  revalidatePath("/account");
+}
+
 export async function dismissOnboardingAction() {
   const userId = await userIdOrThrow();
   await setUserSetting(userId, "onboarding", { dismissed: true });
