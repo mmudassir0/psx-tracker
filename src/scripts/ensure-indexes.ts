@@ -12,6 +12,9 @@ import { db } from "@/db";
 const INDEXES = [
   // Metric lookups filter on line_item (src/lib/financials.ts).
   `create index if not exists "financials_item_symbol_idx" on "financials" ("line_item","symbol")`,
+  // Version check of the market cache (src/lib/market-cache.ts).
+  `create index if not exists "ingest_runs_finished_idx" on "ingest_runs" ("finished_at")`,
+  `create index if not exists "ingest_runs_started_idx" on "ingest_runs" ("started_at")`,
 ];
 
 async function main() {

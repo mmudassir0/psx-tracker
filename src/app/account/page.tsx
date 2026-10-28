@@ -7,6 +7,7 @@ import { ChangePasswordForm } from "@/components/ChangePasswordForm";
 import { ConnectGoogleButton } from "@/components/ConnectGoogleButton";
 import { DeleteAccountForm } from "@/components/DeleteAccountForm";
 import { EmailAlertSettings, TelegramSettings } from "@/components/NotificationSettings";
+import { setWeeklyDigestAction } from "@/app/actions";
 import { emailConfigured, getNotifySettingsFor, telegramConfigured } from "@/lib/user-notify";
 import { listDevices, pushConfigured, vapidPublicKey } from "@/lib/push";
 import { PushSettings } from "@/components/PushSettings";
@@ -110,6 +111,23 @@ export default async function AccountPage({
                   <EmailAlertSettings email={user.email} verified={user.emailVerified} enabled={notify.email} />
                 </div>
               )}
+              <div className="flex flex-col gap-2">
+                <h3 className="text-sm font-medium">Weekly digest</h3>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Friday evening: your portfolio&apos;s week, best and worst holdings, their
+                  announcements and dividends likely in the next 30 days. Sent through the
+                  channels above. {notify.weeklyDigest === false ? "Currently off." : "Currently on."}
+                </p>
+                <form action={setWeeklyDigestAction}>
+                  <input type="hidden" name="enabled" value={notify.weeklyDigest === false ? "true" : "false"} />
+                  <button
+                    type="submit"
+                    className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+                  >
+                    {notify.weeklyDigest === false ? "Turn on" : "Turn off"}
+                  </button>
+                </form>
+              </div>
             </div>
           </Card>
         </section>

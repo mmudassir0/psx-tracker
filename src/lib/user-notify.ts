@@ -19,9 +19,14 @@ export interface UserNotifySettings {
   telegramChatId: string | null;
   /** Email alerts; only ever sent to a verified address. */
   email: boolean;
+  /**
+   * Friday summary through the same channels. On unless switched off, since
+   * only people who already chose a channel receive it.
+   */
+  weeklyDigest?: boolean;
 }
 
-const DEFAULT_NOTIFY: UserNotifySettings = { telegramChatId: null, email: false };
+const DEFAULT_NOTIFY: UserNotifySettings = { telegramChatId: null, email: false, weeklyDigest: true };
 
 export function telegramConfigured(): boolean {
   return Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_USERNAME);

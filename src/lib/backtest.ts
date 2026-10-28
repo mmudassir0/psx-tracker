@@ -4,6 +4,7 @@ import { quotesDaily } from "@/db/schema";
 import { getConstituents, getIndexHistory } from "@/lib/market";
 import { getPortfolio } from "@/lib/portfolio";
 import { DEFAULT_INDEX } from "@/lib/psx/indices";
+import { marketCached } from "@/lib/market-cache";
 
 export type Weighting = "index" | "equal";
 export type RebalanceFrequency = "none" | "monthly" | "quarterly" | "annually";
@@ -87,7 +88,7 @@ function isRebalanceBoundary(
   return cy !== py || Math.floor((cm - 1) / 3) !== Math.floor((pm - 1) / 3);
 }
 
-export async function runBacktest(options: BacktestOptions): Promise<BacktestResult> {
+async function runBacktestUncached(options: BacktestOptions): Promise<BacktestResult> {
   const {
     indexCode = DEFAULT_INDEX,
     startDate,
@@ -395,3 +396,10 @@ export async function planRebalance({
       .map((c) => c.symbol),
   };
 }
+
+/**
+ * A backtest reads years of prices for every constituent (~500k rows for a
+ * large index), and its result depends only on the options and market data,
+ * so it is shared across requests until the next ingest.
+ */
+export const runBacktest = marketCached("backtest", runBacktestUncached);

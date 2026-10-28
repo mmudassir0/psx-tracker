@@ -1,6 +1,8 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { financials } from "@/db/schema";
+import { cache } from "react";
+import { marketCached } from "@/lib/market-cache";
 
 export interface FinancialSeries {
   lineItem: string;
@@ -15,7 +17,7 @@ export interface CompanyFinancials {
   ratios: FinancialSeries[];
 }
 
-export async function getCompanyFinancials(symbol: string): Promise<CompanyFinancials> {
+async function getCompanyFinancialsUncached(symbol: string): Promise<CompanyFinancials> {
   const rows = await db
     .select()
     .from(financials)
@@ -159,3 +161,7 @@ export async function getRevenueGrowthMap(
 
   return out;
 }
+
+export const getCompanyFinancials = cache(
+  marketCached("company-financials", getCompanyFinancialsUncached),
+);

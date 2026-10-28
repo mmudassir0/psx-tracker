@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { marketCached } from "@/lib/market-cache";
 import { payouts } from "@/db/schema";
 import { addDays, todayPkt } from "@/lib/dates";
 
@@ -18,7 +19,7 @@ export interface PayoutRecord {
 }
 
 /** Cash dividends declared in the last `months`, newest first. */
-export async function getPayouts(symbol: string, limit = 20): Promise<PayoutRecord[]> {
+async function getPayoutsUncached(symbol: string, limit = 20): Promise<PayoutRecord[]> {
   return await db
     .select()
     .from(payouts)
@@ -101,7 +102,7 @@ export interface UpcomingBookClosure extends PayoutRecord {
  * This is the date that actually matters for entitlement — you must be on the
  * register when the books close, not merely when the dividend is announced.
  */
-export async function getUpcomingBookClosures(
+async function getUpcomingBookClosuresUncached(
   from: string = todayPkt(),
   limit = 40,
 ): Promise<UpcomingBookClosure[]> {
@@ -127,6 +128,16 @@ export async function getUpcomingBookClosures(
 // Per-request memoisation (React cache): one page render calls these from
 // many components, but market data only changes when the daily ingest runs.
 // Outside a server render, cache() is a pass-through.
-const getTrailingDividendMapCached = cache(getTrailingDividendMapUncached);
+// The shared market cache stores JSON, so the map travels as entries.
+const trailingDividendEntries = marketCached(
+  "trailing-dividends",
+  async (asOf: string) => [...(await getTrailingDividendMapUncached(asOf))],
+);
+const getTrailingDividendMapCached = cache(
+  async (asOf: string) => new Map(await trailingDividendEntries(asOf)),
+);
 export const getTrailingDividendMap = (arg: Parameters<typeof getTrailingDividendMapUncached>[0] = todayPkt()) =>
   getTrailingDividendMapCached(arg);
+
+export const getPayouts = cache(marketCached("payouts", getPayoutsUncached));
+export const getUpcomingBookClosures = marketCached("book-closures", getUpcomingBookClosuresUncached);

@@ -1,16 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { alerts, alertEvents } from "@/db/schema";
+import { alerts, alertEvents, announcements } from "@/db/schema";
 import { getAllSymbolViews, latestQuoteDate } from "@/lib/market";
 import { detectRecomposition } from "@/lib/psx/ingest";
 import { getHoldings } from "@/lib/portfolio";
-import { todayPkt } from "@/lib/dates";
+import { addDays, todayPkt } from "@/lib/dates";
 import type { AlertKind } from "@/lib/alert-types";
 
 export {
   ALERT_LABELS,
   needsThreshold,
+  symbolOptional,
   type AlertKind,
 } from "@/lib/alert-types";
 
@@ -66,9 +67,20 @@ export async function evaluateAlerts(userId?: string): Promise<FiredAlert[]> {
   const fired: FiredAlert[] = [];
 
   for (const rule of rules) {
-    if (await hasFiredOn(rule.id, date)) continue;
-
     const kind = rule.kind as AlertKind;
+
+    // One event per new announcement, not one per day: handled separately.
+    if (kind === "new_announcement") {
+      const symbolsWatched = rule.symbol ? [rule.symbol] : [...(await heldSymbolsOf(rule.userId))];
+      for (const a of await newAnnouncementsFor(rule.id, symbolsWatched, date, rule.createdAt)) {
+        const message = `${a.symbol}: ${a.title}`;
+        await logEvent(rule, a.symbol, message, null, date);
+        fired.push({ alertId: rule.id, userId: rule.userId, symbol: a.symbol, message, value: null });
+      }
+      continue;
+    }
+
+    if (await hasFiredOn(rule.id, date)) continue;
     let hit: { message: string; value: number | null } | null = null;
 
     if (kind === "dropped_from_kmi30" || kind === "added_to_kmi30") {
@@ -123,26 +135,20 @@ export async function evaluateAlerts(userId?: string): Promise<FiredAlert[]> {
             message: `${rule.symbol} within ${fmt(rule.threshold)}% of 52w high (currently -${fmt(current.drawdownFrom52wPct)}%)`,
             value: current.drawdownFrom52wPct,
           };
+        } else if (kind === "near_52w_low") {
+          const aboveLow = pctAboveLow(current.close, current.week52Low);
+          if (aboveLow != null && aboveLow <= rule.threshold) {
+            hit = {
+              message: `${rule.symbol} within ${fmt(rule.threshold)}% of 52w low (currently +${fmt(aboveLow)}%)`,
+              value: aboveLow,
+            };
+          }
         }
       }
     }
 
     if (hit) {
-      const eventId = randomUUID();
-      await db.insert(alertEvents)
-        .values({
-          id: eventId,
-          userId: rule.userId,
-          alertId: rule.id,
-          date,
-          symbol: rule.symbol,
-          message: hit.message,
-          value: hit.value,
-          acknowledged: false,
-          createdAt: new Date(),
-        })
-        .run();
-
+      await logEvent(rule, rule.symbol, hit.message, hit.value, date);
       fired.push({
         alertId: rule.id,
         userId: rule.userId,
@@ -154,6 +160,85 @@ export async function evaluateAlerts(userId?: string): Promise<FiredAlert[]> {
   }
 
   return fired;
+}
+
+async function logEvent(
+  rule: { id: string; userId: string | null },
+  symbol: string | null,
+  message: string,
+  value: number | null,
+  date: string,
+) {
+  await db
+    .insert(alertEvents)
+    .values({
+      id: randomUUID(),
+      userId: rule.userId,
+      alertId: rule.id,
+      date,
+      symbol,
+      message,
+      value,
+      acknowledged: false,
+      createdAt: new Date(),
+    })
+    .run();
+}
+
+/** How far a close sits above its 52-week low, in %. */
+export function pctAboveLow(close: number | null, low: number | null): number | null {
+  if (close == null || low == null || low <= 0) return null;
+  return ((close - low) / low) * 100;
+}
+
+/** Announcements older than this are history, not news. */
+const ANNOUNCEMENT_WINDOW_DAYS = 7;
+/** A first run on a big portfolio shouldn't send dozens of messages. */
+const MAX_ANNOUNCEMENTS_PER_RULE = 10;
+
+/**
+ * Announcements for these symbols from the last week that this rule hasn't
+ * reported yet (matched against its own event log), and none older than the
+ * rule itself.
+ */
+async function newAnnouncementsFor(
+  alertId: string,
+  symbolList: string[],
+  date: string,
+  ruleCreatedAt: Date,
+): Promise<{ symbol: string; title: string }[]> {
+  if (symbolList.length === 0) return [];
+  const created = ruleCreatedAt.toISOString().slice(0, 10);
+  const windowStart = addDays(date, -ANNOUNCEMENT_WINDOW_DAYS);
+  const since = created > windowStart ? created : windowStart;
+
+  const recent = await db
+    .select({ symbol: announcements.symbol, title: announcements.title, date: announcements.date })
+    .from(announcements)
+    .where(and(inArray(announcements.symbol, symbolList), gte(announcements.date, since)))
+    .orderBy(announcements.date)
+    .all();
+  if (recent.length === 0) return [];
+
+  const reported = new Set(
+    (
+      await db
+        .select({ message: alertEvents.message })
+        .from(alertEvents)
+        .where(and(eq(alertEvents.alertId, alertId), gte(alertEvents.date, addDays(since, -1))))
+        .all()
+    ).map((e) => e.message),
+  );
+
+  const seen = new Set<string>();
+  const fresh: { symbol: string; title: string }[] = [];
+  for (const a of recent) {
+    const key = `${a.symbol}: ${a.title}`;
+    if (reported.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    fresh.push({ symbol: a.symbol, title: a.title });
+  }
+  return fresh.slice(-MAX_ANNOUNCEMENTS_PER_RULE);
 }
 
 async function hasFiredOn(alertId: string, date: string): Promise<boolean> {

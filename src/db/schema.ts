@@ -232,7 +232,7 @@ export const linkCodes = sqliteTable("link_codes", {
 export const alerts = sqliteTable("alerts", {
   id: text("id").primaryKey(),
   userId: text("user_id"),
-  /** Null symbol = portfolio-wide rule (used by dropped_from_kmi30). */
+  /** Null symbol = portfolio-wide rule (membership and announcement rules). */
   symbol: text("symbol"),
   kind: text("kind", {
     enum: [
@@ -244,9 +244,10 @@ export const alerts = sqliteTable("alerts", {
       "near_52w_low",
       "dropped_from_kmi30",
       "added_to_kmi30",
+      "new_announcement",
     ],
   }).notNull(),
-  /** Threshold value; unused for membership alerts. */
+  /** Threshold value; unused for membership and announcement alerts. */
   threshold: real("threshold"),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   note: text("note"),
@@ -390,7 +391,12 @@ export const ingestRuns = sqliteTable("ingest_runs", {
   progress: text("progress"),
   /** How the run was launched, for the history list. */
   trigger: text("trigger", { enum: ["cli", "ui", "schedule"] }),
-});
+}, (t) => [
+  // The market cache's version check (max finished_at) reads one row.
+  index("ingest_runs_finished_idx").on(t.finishedAt),
+  // "Last ingest" banner and history list, newest first.
+  index("ingest_runs_started_idx").on(t.startedAt),
+]);
 
 // ---------------------------------------------------------------------------
 // Accounts (Better Auth). Property names are the field names Better Auth

@@ -11,6 +11,7 @@ import {
   financials as financialsTable,
   ingestRuns,
 } from "@/db/schema";
+import { marketCached } from "@/lib/market-cache";
 import { psxFetch, mapLimit, PsxError } from "./client";
 import {
   parseMarketWatch,
@@ -644,7 +645,7 @@ async function writeMarketWatchQuotes(rows: MarketWatchRow[], date: string): Pro
  * Compare the two most recent membership snapshots.
  * `added`/`dropped` are empty when there is only one snapshot so far.
  */
-export async function detectRecomposition(indexCode = TRACKED_INDEX): Promise<{
+async function detectRecompositionUncached(indexCode = TRACKED_INDEX): Promise<{
   previousDate: string | null;
   currentDate: string | null;
   added: string[];
@@ -678,6 +679,9 @@ export async function detectRecomposition(indexCode = TRACKED_INDEX): Promise<{
     dropped: [...previousSet].filter((s) => !currentSet.has(s)).sort(),
   };
 }
+
+/** Cached until the next ingest finishes; uncached in scripts. */
+export const detectRecomposition = marketCached("recomposition", detectRecompositionUncached);
 
 export async function membersOn(indexCode: string, date: string): Promise<string[]> {
   const rows = await db

@@ -19,6 +19,7 @@ import {
   METRIC_NET_MARGIN,
 } from "@/lib/financials";
 import { DEFAULT_INDEX, SHARIAH_INDEX_CODES } from "@/lib/psx/indices";
+import { marketCached } from "@/lib/market-cache";
 
 export interface ConstituentView {
   symbol: string;
@@ -387,7 +388,7 @@ export interface PricePoint {
   volume: number | null;
 }
 
-export async function getPriceHistory(
+async function getPriceHistoryUncached(
   symbol: string,
   fromDate?: string,
 ): Promise<PricePoint[]> {
@@ -407,7 +408,7 @@ export async function getPriceHistory(
     .all();
 }
 
-export async function getIndexHistory(
+async function getIndexHistoryUncached(
   indexCode = DEFAULT_INDEX,
   fromDate?: string,
 ): Promise<{ date: string; current: number }[]> {
@@ -426,7 +427,7 @@ export async function getIndexHistory(
     .all();
 }
 
-export async function getLatestIndexLevel(indexCode = DEFAULT_INDEX) {
+async function getLatestIndexLevelUncached(indexCode = DEFAULT_INDEX) {
   return (
     (await db
       .select()
@@ -486,7 +487,7 @@ export interface IndexSummary {
   snapshotDate: string | null;
 }
 
-export async function getIndexSummaries(): Promise<IndexSummary[]> {
+async function getIndexSummariesUncached(): Promise<IndexSummary[]> {
   // These tables hold one row per index (or member) per day and only the
   // newest of each is wanted: found with index seeks, see indexCodesCte.
   const [levelRows, snapshotRows] = (await Promise.all([
@@ -538,7 +539,7 @@ export async function getLastIngest() {
   );
 }
 
-export async function getSymbolMeta(symbol: string) {
+async function getSymbolMetaUncached(symbol: string) {
   return (
     (await db
       .select()
@@ -558,11 +559,9 @@ export type DatabaseStatus = "ok" | "empty" | "unavailable";
  */
 async function getDatabaseStatusUncached(): Promise<DatabaseStatus> {
   try {
-    const row = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(symbols)
-      .get();
-    return (row?.count ?? 0) === 0 ? "empty" : "ok";
+    // One row is enough to know; count(*) would read the whole table.
+    const row = await db.select({ symbol: symbols.symbol }).from(symbols).limit(1).get();
+    return row ? "ok" : "empty";
   } catch (err) {
     for (let e: unknown = err; e instanceof Error; e = e.cause) {
       if (/no such table/i.test(e.message)) return "empty";
@@ -661,17 +660,24 @@ export async function getMovers(
   };
 }
 
-// Per-request memoisation (React cache): one page render calls these from
-// many components, but market data only changes when the daily ingest runs.
-// Outside a server render, cache() is a pass-through.
-export const latestQuoteDate = cache(latestQuoteDateUncached);
-const latestConstituentDateCached = cache(latestConstituentDateUncached);
+// Two layers: marketCached shares results across requests until the next
+// ingest finishes (see market-cache.ts); React cache() dedupes within one
+// render, where many components ask for the same data.
+export const latestQuoteDate = cache(marketCached("latest-quote-date", latestQuoteDateUncached));
+const latestConstituentDateCached = cache(
+  marketCached("latest-constituent-date", latestConstituentDateUncached),
+);
 export const latestConstituentDate = (arg: Parameters<typeof latestConstituentDateUncached>[0] = DEFAULT_INDEX) =>
   latestConstituentDateCached(arg);
-export const getTrackedIndexCodes = cache(getTrackedIndexCodesUncached);
-const getConstituentsCached = cache(getConstituentsUncached);
+export const getTrackedIndexCodes = cache(marketCached("tracked-index-codes", getTrackedIndexCodesUncached));
+const getConstituentsCached = cache(marketCached("constituents", getConstituentsUncached));
 export const getConstituents = (arg: Parameters<typeof getConstituentsUncached>[0] = DEFAULT_INDEX) =>
   getConstituentsCached(arg);
 export const getDatabaseStatus = cache(getDatabaseStatusUncached);
 export const isDatabaseEmpty = cache(isDatabaseEmptyUncached);
-export const getAllSymbolViews = cache(getAllSymbolViewsUncached);
+export const getAllSymbolViews = cache(marketCached("all-symbol-views", getAllSymbolViewsUncached));
+export const getPriceHistory = cache(marketCached("price-history", getPriceHistoryUncached));
+export const getIndexHistory = cache(marketCached("index-history", getIndexHistoryUncached));
+export const getLatestIndexLevel = cache(marketCached("latest-index-level", getLatestIndexLevelUncached));
+export const getIndexSummaries = cache(marketCached("index-summaries", getIndexSummariesUncached));
+export const getSymbolMeta = cache(marketCached("symbol-meta", getSymbolMetaUncached));

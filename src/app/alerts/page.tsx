@@ -171,7 +171,9 @@ export default async function AlertsPage() {
           <p className="py-6 text-center text-sm text-slate-500">
             No rules yet. The most useful first alert is{" "}
             <em>Dropped from KMI30</em> with the symbol left blank — it watches
-            every position you hold for a Shariah-screen failure.
+            every position you hold for a Shariah-screen failure. <em>New
+            announcement</em> with the symbol blank tells you when any company
+            you hold posts results, a dividend or a board meeting.
           </p>
         )}
       </Card>
