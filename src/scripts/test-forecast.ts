@@ -46,7 +46,8 @@ const v = summariseValuation(series);
 check("current is the latest positive P/E", v.current, 12);
 check("median of 10..34 and 12", v.median, 21.5);
 check("range", [v.low, v.high], [10, 34]);
-check("percentile: 2 of 26 days were lower", Math.round(v.percentile ?? -1), 8);
+check("percentile: 2 lower + 2 ties of 26 days", Math.round(v.percentile ?? -1), 12);
+check("flat history reads as typical", summariseValuation(Array.from({ length: 30 }, (_, i) => ({ date: String(i), pe: 10 }))).percentile, 50);
 check("too little history gives no percentile", summariseValuation(series.slice(0, 5)).percentile, null);
 
 if (failures) {

@@ -13,8 +13,16 @@ import {
 import { prettyDate } from "@/lib/format";
 import type { ValuationPoint } from "@/lib/valuation";
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 /** P/E over time with the stock's own median as the reference line. */
 export function ValuationChart({ data, median }: { data: ValuationPoint[]; median: number | null }) {
+  // Under a year of history, label days ("Oct 12"); beyond, months ("Oct '26").
+  const long = data.length > 1 && data[0].date.slice(0, 4) !== data[data.length - 1].date.slice(0, 4) && data.length > 250;
+  const tick = (d: string) => {
+    const month = MONTHS[Number(d.slice(5, 7)) - 1] ?? "";
+    return long ? `${month} '${d.slice(2, 4)}` : `${month} ${Number(d.slice(8, 10))}`;
+  };
   return (
     <div style={{ height: 200 }}>
       <ResponsiveContainer width="100%" height="100%">
@@ -26,7 +34,7 @@ export function ValuationChart({ data, median }: { data: ValuationPoint[]; media
             tickLine={false}
             axisLine={false}
             minTickGap={40}
-            tickFormatter={(d: string) => d.slice(2, 7)}
+            tickFormatter={tick}
           />
           <YAxis
             tick={{ fontSize: 11, fill: "var(--chart-muted)" }}
