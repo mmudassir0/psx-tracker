@@ -1,0 +1,28 @@
+name: Probe MUFAP (temporary)
+on:
+  push:
+    branches: [probe/mufap]
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pages
+        run: |
+          mkdir -p probe
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+          for t in 1 2 3; do
+            curl -sSL -A "$UA" -o "probe/daily-tab$t.html" -w "tab$t %{http_code} %{size_download} %{url_effective}\n" "https://www.mufap.com.pk/Industry/IndustryStatDaily?tab=$t" || true
+          done
+          curl -sSL -A "$UA" -o probe/home.html -w "home %{http_code} %{size_download}\n" "https://www.mufap.com.pk/" || true
+          curl -sSL -A "$UA" -o probe/psx-etf.html -w "psx %{http_code} %{size_download}\n" "https://dps.psx.com.pk/etfs" || true
+          ls -la probe
+      - name: Save to branch
+        run: |
+          git config user.name "probe"
+          git config user.email "probe@users.noreply.github.com"
+          git add probe
+          git commit -m "probe output" || exit 0
+          git push
