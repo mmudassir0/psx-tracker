@@ -18,6 +18,11 @@ concurrency:
   group: psx-ingest
   cancel-in-progress: false
 
+# Issues: the failure report below opens/closes an issue with GITHUB_TOKEN.
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   ingest:
     runs-on: ubuntu-latest
@@ -39,7 +44,9 @@ jobs:
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
-        run: npx tsx src/scripts/ensure-indexes.ts
+        run: |
+          set -o pipefail
+          npx tsx src/scripts/ensure-indexes.ts 2>&1 | tee -a ingest.log
 
       - name: Run PSX Ingest
         env:
@@ -56,4 +63,25 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_BOT_USERNAME: ${{ secrets.TELEGRAM_BOT_USERNAME }}
         # A manual run from the Actions tab always ingests.
-        run: npx tsx src/scripts/ingest.ts --trigger=schedule ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
+        run: |
+          set -o pipefail
+          npx tsx src/scripts/ingest.ts --trigger=schedule ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }} 2>&1 | tee -a ingest.log
+
+      # The in-app crash alert needs the database (it looks up who the admins
+      # are), so it can't fire when the database itself is the problem. This
+      # one needs nothing but GitHub: the first failure opens an issue with the
+      # error (GitHub notifies you), later failures update it quietly, and the
+      # next good run closes it.
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash .github/scripts/ingest-issue.sh fail
+
+      - name: Close failure report
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash .github/scripts/ingest-issue.sh ok
