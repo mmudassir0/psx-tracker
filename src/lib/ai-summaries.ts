@@ -1,6 +1,6 @@
 /**
- * Plain-English summaries of companies and results filings, written by Grok
- * in the ingest workflow (src/scripts/summarise.ts) and read by the symbol
+ * Plain-English summaries of companies and results filings, written by an
+ * LLM (Groq by default, src/lib/llm.ts) in the ingest workflow (src/scripts/summarise.ts) and read by the symbol
  * page. Inputs are only data this app already holds or PSX publishes; the
  * prompts forbid advice and anything not in the input.
  */

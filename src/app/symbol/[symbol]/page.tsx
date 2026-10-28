@@ -245,7 +245,7 @@ export default async function SymbolPage({
       {summaries.company && (
         <Card
           title="In plain English"
-          subtitle={`Written by ${summaries.company.model} from the financials and announcements below, ${prettyDate(summaries.company.createdAt.toISOString().slice(0, 10))}. AI-generated: it can be wrong, and it isn't advice.`}
+          subtitle={`Written by AI (${summaries.company.model}) from the financials and announcements below, ${prettyDate(summaries.company.createdAt.toISOString().slice(0, 10))}. AI-generated: it can be wrong, and it isn't advice.`}
         >
           <p className="text-sm leading-relaxed">{summaries.company.text}</p>
         </Card>

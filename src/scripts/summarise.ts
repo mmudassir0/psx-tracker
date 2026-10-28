@@ -1,5 +1,6 @@
 /**
- * Writes plain-English summaries with Grok after each ingest.
+ * Writes plain-English summaries with an LLM (Groq by default, see
+ * src/lib/llm.ts) after each ingest.
  *
  *   npx tsx src/scripts/summarise.ts             write summaries
  *   npx tsx src/scripts/summarise.ts --dry-run   show what would be summarised
@@ -9,8 +10,12 @@
  *   at most weekly, up to MAX_COMPANY per run (the first fill takes a few runs).
  * - Results filings from the last 2 weeks: the PDF is read and summarised
  *   once, up to MAX_FILINGS per run.
- * Without XAI_API_KEY it does nothing and exits cleanly. A run costs roughly
- * a few US cents at grok-4.3 prices; the totals are printed at the end.
+ * Each run stays within a token budget (LLM_TOKEN_BUDGET, default sized for
+ * Groq's free tier: ~45k tokens a run, four runs a day under its 200k daily
+ * limit) and is paced to the provider's tokens-per-minute limit, so a full
+ * first pass spreads over a few days. Without GROQ_API_KEY (or XAI_API_KEY)
+ * it does nothing and exits cleanly. Token totals and the list-price cost are
+ * printed at the end.
  */
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
@@ -28,7 +33,7 @@ import {
   recentAnnouncementsOf,
   saveSummary,
 } from "@/lib/ai-summaries";
-import { GrokError, grokComplete, grokConfigured, grokModel } from "@/lib/grok";
+import { LlmError, llmComplete, llmConfigured, llmModel, llmProvider } from "@/lib/llm";
 
 const MAX_COMPANY = 40;
 const MAX_FILINGS = 15;
@@ -37,12 +42,13 @@ const FILING_WINDOW_DAYS = 14;
 const MAX_PDF_BYTES = 8 * 1024 * 1024;
 /** Fewer characters than this means a scanned PDF with no text layer. */
 const MIN_PDF_TEXT = 300;
-/** USD per million tokens for the default model, for the cost estimate only. */
-const PRICE_IN = 1.25;
-const PRICE_OUT = 2.5;
+/** Rough tokens for a prompt of this many characters (for budgeting only). */
+const estimateTokens = (chars: number) => Math.ceil(chars / 3.5);
 
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36";
+
+class BudgetReached extends Error {}
 
 let tokensIn = 0;
 let tokensOut = 0;
@@ -77,29 +83,39 @@ async function readPdfText(url: string): Promise<string | null> {
 }
 
 async function complete(system: string, user: string, maxTokens: number): Promise<string> {
-  const out = await grokComplete(
+  const provider = llmProvider()!;
+  const budget = Number(process.env.LLM_TOKEN_BUDGET) || provider.tokensPerRun;
+  const estimate = estimateTokens(system.length + user.length) + maxTokens + 1_000;
+  if (tokensIn + tokensOut + estimate > budget) throw new BudgetReached();
+
+  const out = await llmComplete(
     [
       { role: "system", content: system },
       { role: "user", content: user },
     ],
     { maxTokens },
   );
-  if (!out) throw new GrokError("XAI_API_KEY is not set");
+  if (!out) throw new LlmError("No LLM API key is set");
   tokensIn += out.inputTokens;
   tokensOut += out.outputTokens;
+  // Stay under the provider's tokens-per-minute limit.
+  const perMinute = Number(process.env.LLM_TOKENS_PER_MINUTE) || provider.tokensPerMinute;
+  if (perMinute) {
+    await new Promise((r) => setTimeout(r, ((out.inputTokens + out.outputTokens) / perMinute) * 60_000));
+  }
   return out.text;
 }
 
 export async function runSummarise({ dryRun = false }: { dryRun?: boolean } = {}) {
   tokensIn = 0;
   tokensOut = 0;
-  if (!grokConfigured() && !dryRun) {
-    console.log("XAI_API_KEY is not set: skipping AI summaries.");
+  if (!llmConfigured() && !dryRun) {
+    console.log("No GROQ_API_KEY (or XAI_API_KEY) set: skipping AI summaries.");
     return;
   }
   const today = todayPkt();
   const list = await universe();
-  console.log(`Summaries for ${list.length} symbols with ${grokModel()}${dryRun ? " (dry run)" : ""}`);
+  console.log(`Summaries for ${list.length} symbols with ${llmModel() || "no model"}${dryRun ? " (dry run)" : ""}`);
 
   const existing = new Map(
     (
@@ -144,17 +160,7 @@ export async function runSummarise({ dryRun = false }: { dryRun?: boolean } = {}
 
   let written = 0;
   try {
-    for (const c of companyBatch) {
-      if (dryRun) {
-        console.log(`  would summarise ${c.symbol}`);
-        continue;
-      }
-      const text = await complete(COMPANY_SYSTEM_PROMPT, `${c.stable}\n\n${c.market}`, 350);
-      await saveSummary({ id: `company:${c.symbol}`, kind: "company", symbol: c.symbol, sourceHash: c.hash, text, model: grokModel() });
-      written++;
-    }
-
-    // --- Results filings ---------------------------------------------------
+    // --- Results filings first: news is time-sensitive and the budget is shared
     const filings = await db
       .select({ id: announcements.id, symbol: announcements.symbol, title: announcements.title, url: announcements.url, date: announcements.date })
       .from(announcements)
@@ -188,26 +194,40 @@ export async function runSummarise({ dryRun = false }: { dryRun?: boolean } = {}
         symbol: f.symbol,
         sourceHash: readable ? hashInput(pdfText) : "unreadable",
         text,
-        model: grokModel(),
+        model: llmModel(),
       });
       if (readable) written++;
       else console.log(`  no text layer: ${f.symbol} ${f.title}`);
     }
-  } catch (err) {
-    if (err instanceof GrokError && (err.status === 401 || err.status === 403)) {
-      console.error("xAI rejected the API key (check the XAI_API_KEY secret):", err.message);
-      process.exit(1);
+
+    // --- Company summaries with what is left of the budget ----------------
+    for (const c of companyBatch) {
+      if (dryRun) {
+        console.log(`  would summarise ${c.symbol}`);
+        continue;
+      }
+      const text = await complete(COMPANY_SYSTEM_PROMPT, `${c.stable}\n\n${c.market}`, 350);
+      await saveSummary({ id: `company:${c.symbol}`, kind: "company", symbol: c.symbol, sourceHash: c.hash, text, model: llmModel() });
+      written++;
     }
-    if (err instanceof GrokError && err.status === 429) {
-      console.error("xAI rate limit or credit exhausted; stopping for this run:", err.message);
+
+  } catch (err) {
+    if (err instanceof BudgetReached) {
+      console.log("Token budget for this run reached; the rest continues next run.");
+    } else if (err instanceof LlmError && (err.status === 401 || err.status === 403)) {
+      console.error(`${llmProvider()?.name} rejected the API key (check the ${llmProvider()?.keyEnv} secret):`, err.message);
+      process.exit(1);
+    } else if (err instanceof LlmError && err.status === 429) {
+      console.error("Rate limit reached; stopping for this run:", err.message);
     } else {
       throw err;
     }
   }
 
-  const cost = (tokensIn * PRICE_IN + tokensOut * PRICE_OUT) / 1e6;
+  const p = llmProvider();
+  const cost = p ? (tokensIn * p.priceIn + tokensOut * p.priceOut) / 1e6 : 0;
   console.log(
-    `\n${written} summaries written; ${tokensIn} input + ${tokensOut} output tokens ≈ US$${cost.toFixed(3)} at ${grokModel()} list prices.`,
+    `\n${written} summaries written; ${tokensIn} input + ${tokensOut} output tokens ≈ US$${cost.toFixed(3)} at ${llmModel()} list prices (free-tier usage costs nothing).`,
   );
   return { written, tokensIn, tokensOut };
 }

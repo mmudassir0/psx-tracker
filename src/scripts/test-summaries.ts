@@ -1,5 +1,5 @@
 /**
- * Grok summaries against a local stub of the xAI API: request shape, what
+ * LLM summaries against a local stub of an OpenAI-compatible API (Groq): request shape, what
  * gets summarised, PDF reading, idempotence and the stored rows.
  */
 import http from "node:http";
@@ -43,7 +43,7 @@ function makePdf(lines: string[]): Buffer {
   return Buffer.from(pdf, "latin1");
 }
 
-const requests: { auth: string | undefined; body: { model: string; messages: { role: string; content: string }[] } }[] = [];
+const requests: { auth: string | undefined; body: { model: string; reasoning_effort?: string; max_completion_tokens?: number; messages: { role: string; content: string }[] } }[] = [];
 
 async function main() {
   console.log(`Using scratch database: ${assertScratchDatabase()}`);
@@ -84,8 +84,9 @@ async function main() {
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  process.env.XAI_API_KEY = "test-key";
-  process.env.XAI_BASE_URL = `${base}/v1`;
+  process.env.GROQ_API_KEY = "test-key";
+  process.env.LLM_BASE_URL = `${base}/v1`;
+  process.env.LLM_TOKENS_PER_MINUTE = "100000000"; // no pacing in tests
 
   const today = todayPkt();
   await db.insert(symbols).values([
@@ -113,8 +114,11 @@ async function main() {
   const first = await runSummarise();
   check("written: 1 company + 1 readable filing", first?.written, 2);
   check("API key sent as Bearer", requests[0]?.auth, "Bearer test-key");
-  check("model", requests[0]?.body.model, "grok-4.3");
-  check("company prompt carries the financials", requests[0]?.body.messages[1].content.includes("Total Income (pkr_thousands): 2025=500, 2024=400"), true);
+  check("Groq model", requests[0]?.body.model, "openai/gpt-oss-120b");
+  const companyReq = requests.find((r) => r.body.messages[0].content.includes("summaries of companies"));
+  check("short reasoning, room for the answer", [companyReq?.body.reasoning_effort, companyReq?.body.max_completion_tokens], ["low", 1350]);
+  check("filings are summarised before companies", requests[0]?.body.messages[0].content.includes("summarise filings"), true);
+  check("company prompt carries the financials", companyReq?.body.messages[1].content.includes("Total Income (pkr_thousands): 2025=500, 2024=400"), true);
   check("filing prompt carries the PDF text", requests.some((r) => r.body.messages[1].content.includes("Profit after tax 345,678")), true);
   check("only 'result' filings are read", requests.length, 2);
 
@@ -135,8 +139,15 @@ async function main() {
   check("company summary", s.company?.text, "Revenue grew steadily.");
   check("filing summaries keyed by announcement id, empty ones hidden", [...s.filings.keys()], ["res"]);
 
-  console.log("\n[4] Without a key");
-  delete process.env.XAI_API_KEY;
+  console.log("\n[4] Token budget stops a run cleanly");
+  await db.delete(aiSummaries).run();
+  process.env.LLM_TOKEN_BUDGET = "2500";
+  const capped = await runSummarise();
+  check("one call fits a 2,500-token budget, then it stops", capped?.written, 1);
+  delete process.env.LLM_TOKEN_BUDGET;
+
+  console.log("\n[5] Without a key");
+  delete process.env.GROQ_API_KEY;
   const none = await runSummarise();
   check("skips cleanly", none, undefined);
 
