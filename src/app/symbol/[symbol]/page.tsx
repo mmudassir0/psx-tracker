@@ -462,7 +462,7 @@ export default async function SymbolPage({
         {news.length > 0 ? (
           <ul className="divide-y divide-slate-100 text-sm dark:divide-slate-800">
             {news.map((a) => (
-              <li key={a.id} className="flex gap-3 py-2">
+              <li key={a.id} className="flex items-start gap-3 py-2">
                 <span className="tabular w-24 shrink-0 text-xs text-slate-500 dark:text-slate-400">
                   {prettyDate(a.date)}
                 </span>

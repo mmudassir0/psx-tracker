@@ -66,6 +66,13 @@ import {
   deleteCustomScreen,
 } from "@/lib/screens";
 import { getZakatSettings, ZAKAT_SETTINGS_KEY } from "@/lib/zakat";
+import {
+  addFundTransaction,
+  createFund,
+  deleteFund,
+  deleteFundTransaction,
+  recordFundNav,
+} from "@/lib/funds";
 
 export interface ActionState {
   ok: boolean;
@@ -857,4 +864,98 @@ export async function saveDashboardCardsAction(input: { order: string[]; hidden:
     hidden: clean(input.hidden),
   });
   revalidatePath("/");
+}
+
+// --- Mutual funds -------------------------------------------------------------
+
+const fundSchema = z.object({
+  name: z.string().trim().min(2, "Fund name is required").max(120),
+  amc: z.string().trim().max(120).optional(),
+  category: z.string().trim().max(80).optional(),
+  shariah: z.boolean(),
+});
+
+export async function createFundAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
+  const parsed = fundSchema.safeParse({
+    name: formData.get("name"),
+    amc: formData.get("amc") || undefined,
+    category: formData.get("category") || undefined,
+    shariah: formData.get("shariah") === "on",
+  });
+  if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid fund" };
+  await createFund(userId, parsed.data);
+  revalidatePath("/funds");
+  return { ok: true, message: `Added ${parsed.data.name}.` };
+}
+
+const fundTxSchema = z.object({
+  fundId: z.string().min(1, "Choose a fund"),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date"),
+  type: z.enum(["buy", "redeem", "dividend"]),
+  units: z.coerce.number().min(0).default(0),
+  nav: z.coerce.number().min(0).default(0),
+  amount: z.coerce.number().positive("Amount must be greater than zero").optional(),
+  note: z.string().trim().max(200).optional(),
+});
+
+export async function addFundTransactionAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
+  const parsed = fundTxSchema.safeParse({
+    fundId: formData.get("fundId"),
+    date: formData.get("date"),
+    type: formData.get("type"),
+    units: formData.get("units") || 0,
+    nav: formData.get("nav") || 0,
+    amount: formData.get("amount") || undefined,
+    note: formData.get("note") || undefined,
+  });
+  if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid transaction" };
+  if (parsed.data.type === "dividend" && parsed.data.amount == null) {
+    return { ok: false, message: "Enter the dividend amount received" };
+  }
+  const result = await addFundTransaction(userId, parsed.data);
+  if (!result.ok) return result;
+  revalidatePath("/funds");
+  revalidatePath("/portfolio");
+  return { ok: true, message: "Recorded." };
+}
+
+const fundNavSchema = z.object({
+  fundId: z.string().min(1, "Choose a fund"),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date"),
+  nav: z.coerce.number().positive("NAV must be greater than zero"),
+});
+
+export async function recordFundNavAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const userId = await getCurrentUserId();
+  if (!userId) return NOT_LOGGED_IN;
+  const parsed = fundNavSchema.safeParse({
+    fundId: formData.get("fundId"),
+    date: formData.get("date"),
+    nav: formData.get("nav"),
+  });
+  if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid NAV" };
+  if (!(await recordFundNav(userId, parsed.data))) return { ok: false, message: "Unknown fund" };
+  revalidatePath("/funds");
+  revalidatePath("/portfolio");
+  return { ok: true, message: "NAV saved." };
+}
+
+export async function deleteFundAction(formData: FormData) {
+  const userId = await userIdOrThrow();
+  const id = String(formData.get("id") ?? "");
+  if (id) await deleteFund(userId, id);
+  revalidatePath("/funds");
+  revalidatePath("/portfolio");
+}
+
+export async function deleteFundTransactionAction(formData: FormData) {
+  const userId = await userIdOrThrow();
+  const id = String(formData.get("id") ?? "");
+  if (id) await deleteFundTransaction(userId, id);
+  revalidatePath("/funds");
+  revalidatePath("/portfolio");
 }

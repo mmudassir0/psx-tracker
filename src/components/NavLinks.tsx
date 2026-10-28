@@ -85,6 +85,7 @@ const GROUPS: NavGroup[] = [
     label: "Portfolio",
     items: [
       { href: "/portfolio", label: "Holdings", hint: "Positions and P&L" },
+      { href: "/funds", label: "Mutual funds", hint: "Funds you hold, at NAV" },
       { href: "/risk", label: "Risk", hint: "Correlation, beta, concentration" },
       { href: "/strategy", label: "Strategy", hint: "Backtest and rebalance" },
       { href: "/watchlist", label: "Watchlist", hint: "Names you don't own yet" },
