@@ -29,7 +29,7 @@ async function main() {
 
   for (const s of ["MEBL", "OGDC", "LUCK"]) {
     await db.insert(symbols).values({ symbol: s, name: s, indexes: "KSE100" }).run();
-    await db.insert(quotesDaily).values({ symbol: s, date: TODAY, close: 104, ldcp: 100, source: "test" }).run();
+    await db.insert(quotesDaily).values({ symbol: s, date: TODAY, close: 104, ldcp: 100, source: "market-watch" }).run();
     await db
       .insert(companyStats)
       .values({ symbol: s, date: TODAY, week52High: 200, week52Low: 100 })

@@ -33,6 +33,8 @@ import { count as fmtCount, prettyDate, relativeTime } from "@/lib/format";
 import { IngestButton } from "@/components/IngestButton";
 import { marketCached } from "@/lib/market-cache";
 
+export const dynamic = "force-dynamic";
+
 /**
  * Coverage counts scan whole tables (~2.5M rows on production data), so they
  * are computed once per ingest and shared, not on every visit.

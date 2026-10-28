@@ -16,6 +16,8 @@ import {
 } from "@/components/ui";
 import { money, pct, count, prettyDate } from "@/lib/format";
 
+export const dynamic = "force-dynamic";
+
 export default async function ZakatPage() {
   const user = await requireUser("/zakat");
   if (await isDatabaseEmpty()) {

@@ -5,7 +5,8 @@ import { ensureDefaultPortfolio, listPortfolios } from "@/lib/portfolios";
 import { getPortfolioHistory } from "@/lib/portfolio-history";
 import { getConstituents, getTrackedIndexCodes, isDatabaseEmpty, latestQuoteDate } from "@/lib/market";
 import { ledgerCashFlows, xirr } from "@/lib/xirr";
-import { weekdaysBetween } from "@/lib/dates";
+import { todayPkt, weekdaysBetween } from "@/lib/dates";
+import { forecastDividends } from "@/lib/dividend-forecast";
 import { getBenchmarkIndex } from "@/lib/benchmark";
 import { BENCHMARK_CHOICES, SHARIAH_INDEX_CODES } from "@/lib/psx/indices";
 import { BenchmarkPicker } from "@/components/BenchmarkPicker";
@@ -80,6 +81,7 @@ export default async function PortfolioPage({
   const historyLongEnough = firstTrade != null && quoteDate != null && weekdaysBetween(firstTrade, quoteDate) >= 63;
   const annualReturn =
     historyLongEnough && quoteDate ? xirr(ledgerCashFlows(ledger, portfolio.marketValue, quoteDate)) : null;
+  const dividends = await forecastDividends(openPositions, ledger, quoteDate ?? todayPkt());
   const heldSymbols = [
     ...new Set([...openPositions.map((h) => h.symbol), ...ledger.map((t) => t.symbol)]),
   ];
@@ -342,6 +344,8 @@ export default async function PortfolioPage({
             </Card>
           </div>
 
+          <DividendForecastCard forecast={dividends} />
+
           <Card title="Record a transaction">
             <TransactionForm
               symbols={constituents.map((c) => c.symbol)}
@@ -461,4 +465,86 @@ function chipClass(active: boolean): string {
   return active
     ? "rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white dark:bg-slate-100 dark:text-slate-900"
     : "rounded-md px-2 py-1 text-xs text-slate-600 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-800";
+}
+
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Next 12 months of dividends if each holding pays what it paid last year. */
+function DividendForecastCard({ forecast }: { forecast: Awaited<ReturnType<typeof forecastDividends>> }) {
+  const peak = Math.max(...forecast.byMonth.map((m) => m.amount), 0);
+  return (
+    <Card
+      title="Expected dividends, next 12 months"
+      subtitle="If each holding pays what it paid over the last 12 months, around the same time. Gross, before withholding tax. Dividends you record take priority over PSX's history."
+    >
+      {forecast.rows.length === 0 ? (
+        <p className="py-4 text-sm text-slate-500">
+          None of your holdings paid a cash dividend in the last 12 months that we know of. Record the
+          dividends you receive below and they will be projected here.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <StatTile label="Expected income" value={compactPkr(forecast.total)} hint="Gross, next 12 months" />
+            <StatTile
+              label="Yield on market value"
+              value={pct(forecast.yieldOnValuePct, 1, false)}
+              hint="Expected income ÷ value of open positions"
+            />
+          </div>
+
+          <div aria-label="Expected income by month" className="flex h-28 items-end gap-1">
+            {forecast.byMonth.map((m) => (
+              <div key={m.month} className="flex flex-1 flex-col items-center gap-1">
+                <div
+                  title={`${MONTH_NAMES[Number(m.month) - 1]}: ${money(m.amount)}`}
+                  className={`w-full rounded-sm ${m.amount > 0 ? "bg-emerald-500/80" : "bg-slate-200 dark:bg-slate-800"}`}
+                  style={{ height: peak > 0 && m.amount > 0 ? `${Math.max(6, (m.amount / peak) * 88)}px` : "2px" }}
+                />
+                <span className="text-[10px] text-slate-500">{MONTH_NAMES[Number(m.month) - 1]}</span>
+              </div>
+            ))}
+          </div>
+
+          <TableWrap>
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <Th>Symbol</Th>
+                  <Th align="right">Shares</Th>
+                  <Th align="right">Per share / yr</Th>
+                  <Th align="right">Expected</Th>
+                  <Th align="right">Yield</Th>
+                  <Th align="right">Yield on cost</Th>
+                  <Th>Based on</Th>
+                </tr>
+              </thead>
+              <tbody className="tabular">
+                {forecast.rows.map((r) => (
+                  <tr key={r.symbol}>
+                    <Td><SymbolLink symbol={r.symbol} /></Td>
+                    <Td align="right">{count(r.quantity)}</Td>
+                    <Td align="right">{money(r.annualPerShare)}</Td>
+                    <Td align="right">{money(r.expectedIncome)}</Td>
+                    <Td align="right">{pct(r.yieldOnValuePct, 1, false)}</Td>
+                    <Td align="right">{pct(r.yieldOnCostPct, 1, false)}</Td>
+                    <Td>
+                      <Badge tone={r.source === "recorded" ? "good" : "neutral"}>
+                        {r.source === "recorded" ? "your records" : "PSX history"}
+                      </Badge>
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableWrap>
+          {forecast.noHistory.length > 0 && (
+            <p className="text-xs text-slate-500">
+              No cash dividend in the last 12 months: {forecast.noHistory.join(", ")}.
+            </p>
+          )}
+        </div>
+      )}
+    </Card>
+  );
 }
