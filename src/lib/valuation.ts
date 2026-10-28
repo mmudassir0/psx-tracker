@@ -22,7 +22,7 @@ export interface ValuationSummary {
   median: number | null;
   low: number | null;
   high: number | null;
-  /** Share of past days with a lower P/E than today, 0-100. */
+  /** Share of recorded days with a lower P/E than today (ties count half), 0-100. */
   percentile: number | null;
 }
 
@@ -39,7 +39,8 @@ export function summariseValuation(series: ValuationPoint[]): ValuationSummary {
   const mid = Math.floor(sorted.length / 2);
   const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
   const current = points[points.length - 1].pe;
-  const below = sorted.filter((v) => v < current).length;
+  // Mid-rank: ties count half, so a flat history reads as typical (50), not cheap.
+  const below = sorted.filter((v) => v < current).length + sorted.filter((v) => v === current).length / 2;
   return {
     points,
     current,
