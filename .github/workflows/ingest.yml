@@ -40,13 +40,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Ensure database indexes
+      - name: Ensure database schema
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
         run: |
           set -o pipefail
-          npx tsx src/scripts/ensure-indexes.ts 2>&1 | tee -a ingest.log
+          npx tsx src/scripts/ensure-schema.ts 2>&1 | tee -a ingest.log
 
       - name: Run PSX Ingest
         env:
@@ -66,6 +66,17 @@ jobs:
         run: |
           set -o pipefail
           npx tsx src/scripts/ingest.ts --trigger=schedule ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }} 2>&1 | tee -a ingest.log
+
+      # Plain-English summaries with xAI Grok (src/scripts/summarise.ts).
+      # Skipped without the XAI_API_KEY secret; never fails the ingest.
+      - name: AI summaries
+        continue-on-error: true
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          XAI_MODEL: ${{ vars.XAI_MODEL }}
+        run: npx tsx src/scripts/summarise.ts
 
       # The in-app crash alert needs the database (it looks up who the admins
       # are), so it can't fire when the database itself is the problem. This

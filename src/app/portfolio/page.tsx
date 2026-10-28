@@ -7,6 +7,7 @@ import { getConstituents, getTrackedIndexCodes, isDatabaseEmpty, latestQuoteDate
 import { ledgerCashFlows, xirr } from "@/lib/xirr";
 import { todayPkt, weekdaysBetween } from "@/lib/dates";
 import { forecastDividends } from "@/lib/dividend-forecast";
+import { getFundPortfolio } from "@/lib/funds";
 import { getBenchmarkIndex } from "@/lib/benchmark";
 import { BENCHMARK_CHOICES, SHARIAH_INDEX_CODES } from "@/lib/psx/indices";
 import { BenchmarkPicker } from "@/components/BenchmarkPicker";
@@ -81,7 +82,11 @@ export default async function PortfolioPage({
   const historyLongEnough = firstTrade != null && quoteDate != null && weekdaysBetween(firstTrade, quoteDate) >= 63;
   const annualReturn =
     historyLongEnough && quoteDate ? xirr(ledgerCashFlows(ledger, portfolio.marketValue, quoteDate)) : null;
-  const dividends = await forecastDividends(openPositions, ledger, quoteDate ?? todayPkt());
+  const [dividends, fundPortfolio] = await Promise.all([
+    forecastDividends(openPositions, ledger, quoteDate ?? todayPkt()),
+    // Funds aren't split by portfolio; show them on the combined view only.
+    selected ? null : getFundPortfolio(user.id),
+  ]);
   const heldSymbols = [
     ...new Set([...openPositions.map((h) => h.symbol), ...ledger.map((t) => t.symbol)]),
   ];
@@ -345,6 +350,32 @@ export default async function PortfolioPage({
           </div>
 
           <DividendForecastCard forecast={dividends} />
+
+          {fundPortfolio && fundPortfolio.holdings.some((h) => h.units > 0) && (
+            <Card
+              title="Mutual funds"
+              subtitle="Valued at the NAVs you recorded; not included in the figures above."
+            >
+              <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 text-sm">
+                <span>
+                  Value <span className="tabular font-semibold">{compactPkr(fundPortfolio.value)}</span>
+                </span>
+                <span>
+                  Unrealised{" "}
+                  <span className={`tabular font-semibold ${toneClass(fundPortfolio.unrealizedPnl)}`}>
+                    {signedMoney(fundPortfolio.unrealizedPnl)}
+                  </span>
+                </span>
+                <span>
+                  Stocks + funds{" "}
+                  <span className="tabular font-semibold">{compactPkr(portfolio.marketValue + fundPortfolio.value)}</span>
+                </span>
+                <Link href="/funds" className="underline underline-offset-2">
+                  Fund details →
+                </Link>
+              </div>
+            </Card>
+          )}
 
           <Card title="Record a transaction">
             <TransactionForm

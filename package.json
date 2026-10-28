@@ -17,8 +17,8 @@
     "telegram:setup": "tsx src/scripts/telegram-setup.ts",
     "backup": "tsx src/scripts/backup.ts",
     "backup:decrypt": "tsx src/scripts/backup-decrypt.ts",
-    "test": "npm run test:portfolio && npm run test:recomposition && npm run test:strategy && npm run test:financials && npm run test:accounts && npm run test:features && npm run test:readbudget && npm run test:alerts && npm run test:forecast && npm run test:digest && npm run test:links",
-    "test:ci": "npm run test:portfolio && npm run test:recomposition && npm run test:strategy && npm run test:financials && npm run test:accounts && npm run test:features && npm run test:readbudget && npm run test:alerts && npm run test:forecast && npm run test:digest",
+    "test": "npm run test:portfolio && npm run test:recomposition && npm run test:strategy && npm run test:financials && npm run test:accounts && npm run test:features && npm run test:readbudget && npm run test:alerts && npm run test:forecast && npm run test:digest && npm run test:summaries && npm run test:funds && npm run test:links",
+    "test:ci": "npm run test:portfolio && npm run test:recomposition && npm run test:strategy && npm run test:financials && npm run test:accounts && npm run test:features && npm run test:readbudget && npm run test:alerts && npm run test:forecast && npm run test:digest && npm run test:summaries && npm run test:funds",
     "typecheck": "next typegen && tsc --noEmit -p .",
     "test:links": "tsx src/scripts/run-test.ts links",
     "test:portfolio": "tsx src/scripts/run-test.ts portfolio .scratch/test-portfolio.db",
@@ -31,6 +31,9 @@
     "test:alerts": "tsx src/scripts/run-test.ts alerts .scratch/test-alerts.db",
     "test:forecast": "tsx src/scripts/run-test.ts forecast .scratch/test-forecast.db",
     "test:digest": "tsx src/scripts/run-test.ts digest .scratch/test-digest.db",
+    "test:summaries": "tsx src/scripts/run-test.ts summaries .scratch/test-summaries.db",
+    "test:funds": "tsx src/scripts/run-test.ts funds .scratch/test-funds.db",
+    "summarise": "tsx src/scripts/summarise.ts",
     "digest": "tsx src/scripts/digest.ts",
     "seed:demo": "tsx src/scripts/seed-demo.ts",
     "seed:clear": "tsx src/scripts/seed-demo.ts --clear"
@@ -46,6 +49,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "recharts": "^3.10.1",
+    "unpdf": "^1.4.0",
     "web-push": "3.6.7",
     "zod": "^4.4.3"
   },

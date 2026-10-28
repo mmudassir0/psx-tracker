@@ -4,6 +4,9 @@ import {
   alertEvents,
   alerts,
   customScreens,
+  fundNavs,
+  fundTransactions,
+  funds,
   linkCodes,
   portfolios,
   pushSubscriptions,
@@ -19,7 +22,7 @@ import {
  * tables that carry a user_id.
  */
 export async function exportUserData(userId: string) {
-  const [portfolioRows, transactionRows, watchlistRows, alertRows, alertEventRows, screenRows, settingRows] =
+  const [portfolioRows, transactionRows, watchlistRows, alertRows, alertEventRows, screenRows, settingRows, fundRows, fundTxRows] =
     await Promise.all([
       db.select().from(portfolios).where(eq(portfolios.userId, userId)).orderBy(asc(portfolios.createdAt)).all(),
       db.select().from(transactions).where(eq(transactions.userId, userId)).orderBy(asc(transactions.date)).all(),
@@ -28,7 +31,12 @@ export async function exportUserData(userId: string) {
       db.select().from(alertEvents).where(eq(alertEvents.userId, userId)).all(),
       db.select().from(customScreens).where(eq(customScreens.userId, userId)).all(),
       db.select().from(userSettings).where(eq(userSettings.userId, userId)).all(),
+      orEmpty(() => db.select().from(funds).where(eq(funds.userId, userId)).all()),
+      orEmpty(() => db.select().from(fundTransactions).where(eq(fundTransactions.userId, userId)).all()),
     ]);
+  const fundNavRows = fundRows.length
+    ? await db.select().from(fundNavs).where(inArray(fundNavs.fundId, fundRows.map((f) => f.id))).all()
+    : [];
 
   return {
     portfolios: portfolioRows,
@@ -38,7 +46,19 @@ export async function exportUserData(userId: string) {
     alertEvents: alertEventRows,
     customScreens: screenRows.map((s) => ({ ...s, rules: safeJson(s.rules) })),
     settings: Object.fromEntries(settingRows.map((s) => [s.key, safeJson(s.value)])),
+    funds: fundRows,
+    fundTransactions: fundTxRows,
+    fundNavs: fundNavRows,
   };
+}
+
+/** Fund tables may not exist yet on an older database: read as empty. */
+async function orEmpty<T>(query: () => T[] | Promise<T[]>): Promise<T[]> {
+  try {
+    return await query();
+  } catch {
+    return [];
+  }
 }
 
 function safeJson(raw: string): unknown {
@@ -94,4 +114,10 @@ export async function deleteUserData(userId: string): Promise<void> {
   await db.delete(userSettings).where(eq(userSettings.userId, userId)).run();
   await db.delete(linkCodes).where(eq(linkCodes.userId, userId)).run();
   await db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, userId)).run();
+  const fundIds = (await orEmpty(() => db.select({ id: funds.id }).from(funds).where(eq(funds.userId, userId)).all())).map((f) => f.id);
+  if (fundIds.length > 0) {
+    await db.delete(fundNavs).where(inArray(fundNavs.fundId, fundIds)).run();
+    await db.delete(fundTransactions).where(eq(fundTransactions.userId, userId)).run();
+    await db.delete(funds).where(eq(funds.userId, userId)).run();
+  }
 }
