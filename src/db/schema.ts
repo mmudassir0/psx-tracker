@@ -500,3 +500,80 @@ export const pushSubscriptions = sqliteTable(
   },
   (t) => [index("push_subscriptions_user_idx").on(t.userId)],
 );
+
+/**
+ * Plain-English summaries written by an LLM (xAI Grok) during the ingest
+ * workflow, never at page-view time. `sourceHash` is a hash of the input the
+ * summary was written from, so it is only regenerated when that changes.
+ *   id "company:MEBL"          what the financials and recent news say
+ *   id "announcement:<id>"     the key points of a results PDF
+ */
+export const aiSummaries = sqliteTable(
+  "ai_summaries",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind", { enum: ["company", "announcement"] }).notNull(),
+    symbol: text("symbol").notNull(),
+    sourceHash: text("source_hash").notNull(),
+    text: text("text").notNull(),
+    model: text("model").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [index("ai_summaries_symbol_idx").on(t.symbol, t.kind)],
+);
+
+/**
+ * Mutual funds a user holds. MUFAP (the industry's NAV source) can't be read
+ * automatically, so funds, their transactions and NAVs are entered by the
+ * user. Kept apart from `transactions`: units at a NAV, not shares on PSX.
+ */
+export const funds = sqliteTable(
+  "funds",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    /** Asset management company, e.g. "Al Meezan Investment Management". */
+    amc: text("amc"),
+    /** Free text as MUFAP labels it, e.g. "Shariah Compliant Money Market". */
+    category: text("category"),
+    shariah: integer("shariah", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [index("funds_user_idx").on(t.userId)],
+);
+
+/** Purchases, redemptions and cash dividends of a fund. */
+export const fundTransactions = sqliteTable(
+  "fund_transactions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    fundId: text("fund_id").notNull(),
+    date: text("date").notNull(),
+    type: text("type", { enum: ["buy", "redeem", "dividend"] }).notNull(),
+    /** Units bought or redeemed; 0 for a cash dividend. */
+    units: real("units").notNull().default(0),
+    /** NAV per unit used for the transaction. */
+    nav: real("nav").notNull().default(0),
+    /** PKR paid (buy, including any front-end load) or received (redeem, dividend). */
+    amount: real("amount").notNull(),
+    note: text("note"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [
+    index("fund_transactions_user_idx").on(t.userId),
+    index("fund_transactions_fund_idx").on(t.fundId, t.date),
+  ],
+);
+
+/** NAVs the user noted, newest used for valuation. */
+export const fundNavs = sqliteTable(
+  "fund_navs",
+  {
+    fundId: text("fund_id").notNull(),
+    date: text("date").notNull(),
+    nav: real("nav").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.fundId, t.date] })],
+);

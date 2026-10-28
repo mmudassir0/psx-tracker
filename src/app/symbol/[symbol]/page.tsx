@@ -19,6 +19,7 @@ import { getPortfolio } from "@/lib/portfolio";
 import { SHARIAH_INDEX_CODES, sortIndexCodes } from "@/lib/psx/indices";
 import { ValuationChart } from "@/components/ValuationChart";
 import { getValuationHistory, MIN_VALUATION_POINTS } from "@/lib/valuation";
+import { getSummariesFor } from "@/lib/ai-summaries";
 import { StockChart } from "@/components/StockChart";
 import { getBenchmarkIndex } from "@/lib/benchmark";
 import {
@@ -96,10 +97,11 @@ export default async function SymbolPage({
   ]);
 
   const benchmarkCode = await getBenchmarkIndex(await getCurrentUserId());
-  const [benchmarkHistory, allViews, valuation] = await Promise.all([
+  const [benchmarkHistory, allViews, valuation, summaries] = await Promise.all([
     getIndexHistory(benchmarkCode),
     getAllSymbolViews(),
     getValuationHistory(symbol),
+    getSummariesFor(symbol),
   ]);
 
   // Same-sector companies, largest first, for the peers table.
@@ -237,6 +239,15 @@ export default async function SymbolPage({
               }
             />
           </dl>
+        </Card>
+      )}
+
+      {summaries.company && (
+        <Card
+          title="In plain English"
+          subtitle={`Written by ${summaries.company.model} from the financials and announcements below, ${prettyDate(summaries.company.createdAt.toISOString().slice(0, 10))}. AI-generated: it can be wrong, and it isn't advice.`}
+        >
+          <p className="text-sm leading-relaxed">{summaries.company.text}</p>
         </Card>
       )}
 
@@ -458,7 +469,7 @@ export default async function SymbolPage({
                 <Badge tone={CATEGORY_TONE[a.category] ?? "neutral"}>
                   {a.category.replace("_", " ")}
                 </Badge>
-                <span className="flex-1">
+                <div className="min-w-0 flex-1">
                   {a.url ? (
                     <a
                       href={a.url}
@@ -471,7 +482,17 @@ export default async function SymbolPage({
                   ) : (
                     a.title
                   )}
-                </span>
+                  {summaries.filings.get(a.id) && (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-xs text-slate-500 dark:text-slate-400">
+                        AI summary of the filing
+                      </summary>
+                      <div className="mt-1 whitespace-pre-line rounded-md bg-slate-50 p-2 text-xs leading-relaxed dark:bg-slate-800/60">
+                        {summaries.filings.get(a.id)!.text}
+                      </div>
+                    </details>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

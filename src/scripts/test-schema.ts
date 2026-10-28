@@ -19,4 +19,7 @@ export async function resetToAppSchema() {
   // Only the generated DDL is used; it runs on the raw handle.
   const { statementsToExecute } = await pushSQLiteSchema(schema, db as never);
   for (const statement of statementsToExecute) db.$client.exec(statement);
+  // drizzle-kit/api adds an enumerable Array.prototype.random, which breaks
+  // libraries that check for a clean prototype (pdf.js refuses to load).
+  delete (Array.prototype as unknown as Record<string, unknown>).random;
 }
